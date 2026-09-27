@@ -68,6 +68,9 @@ class piper_tts extends module
         if (!isset($this->config['SENTENCE_SILENCE'])) {
             $this->config['SENTENCE_SILENCE'] = '0.15';
         }
+        if (!isset($this->config['LEAD_SILENCE'])) {
+            $this->config['LEAD_SILENCE'] = '1.0';
+        }
         if (!isset($this->config['USE_CACHE'])) {
             $this->config['USE_CACHE'] = '1';
         }
@@ -77,9 +80,106 @@ class piper_tts extends module
         if (!isset($this->config['CACHE_CLEANUP'])) {
             $this->config['CACHE_CLEANUP'] = '0';
         }
-        if (!isset($this->config['WS_PORT'])) {
-            $this->config['WS_PORT'] = '8001';
+        if (!isset($this->config['WS_PORT']) || !preg_match('/^\d+$/', (string)$this->config['WS_PORT'])) {
+            $this->config['WS_PORT'] = defined('WEBSOCKETS_PORT') ? (string)WEBSOCKETS_PORT : '8001';
         }
+    }
+
+    /**
+     * Порт, на котором реально слушает WebSocket-сервер ядра.
+     * Источник истины — константа WEBSOCKETS_PORT: сервер занимает именно её,
+     * и postToWebSocket() ходит на неё же. Настройка WS_PORT модуля является
+     * лишь запасным вариантом на случай, если константа не определена.
+     */
+    private function getWsPort()
+    {
+        if (defined('WEBSOCKETS_PORT')) {
+            return (int)WEBSOCKETS_PORT;
+        }
+        $port = (int)$this->config['WS_PORT'];
+        return $port > 0 ? $port : 8001;
+    }
+
+    private function isWsAlive()
+    {
+        $errno = 0;
+        $errstr = '';
+        $fp = @fsockopen('127.0.0.1', $this->getWsPort(), $errno, $errstr, 0.5);
+        if ($fp === false) {
+            return false;
+        }
+        fclose($fp);
+        return true;
+    }
+
+    private function getArch()
+    {
+        static $arch = null;
+        if ($arch === null) {
+            $arch = trim((string)shell_exec('uname -m'));
+        }
+        return $arch;
+    }
+
+    private function isArch64()
+    {
+        return in_array($this->getArch(), array('x86_64', 'amd64', 'aarch64'));
+    }
+
+    private function e($value)
+    {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    }
+
+    private function fatal($message)
+    {
+        while (ob_get_level()) ob_end_clean();
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<html><body style="font-family:sans-serif;padding:40px">';
+        echo '<p style="color:red">' . $this->e($message) . '</p>';
+        echo '<script>setTimeout(function(){window.location.href="' . $this->e('?action=piper_tts') . '"},1500);</script>';
+        echo '</body></html>';
+        exit;
+    }
+
+    /**
+     * Белый список голоса и качества.
+     *
+     * Значения приходят из GET и подставляются в пути, которые уходят в mkdir/chown/rm,
+     * поэтому произвольная строка недопустима: escapeshellarg защищает только от
+     * инъекции в команду, но не от выхода за пределы MODELS_DIR через "..".
+     */
+    private function sanitizeVoice($voice)
+    {
+        $allowed = array('irina', 'denis', 'dmitri', 'ruslan', 'luka');
+        return in_array($voice, $allowed, true) ? $voice : null;
+    }
+
+    private function sanitizeQuality($quality)
+    {
+        $allowed = array('x_low', 'low', 'medium', 'high', 'x_high');
+        return in_array($quality, $allowed, true) ? $quality : null;
+    }
+
+    /**
+     * Каталог модели внутри MODELS_DIR — вторая линия защиты после белого списка.
+     */
+    private function resolveModelDir($voice, $quality)
+    {
+        $base = realpath($this->config['MODELS_DIR']);
+        if ($base === false) {
+            return null;
+        }
+        $modelDir = $base . '/ru_RU-' . $voice . '-' . $quality;
+        $real = realpath($modelDir);
+        if ($real === false) {
+            // Каталога ещё нет — проверяем нормализованный путь префиксом.
+            if (strpos($modelDir, $base . '/') !== 0) {
+                return null;
+            }
+            return $modelDir;
+        }
+        return (strpos($real, $base . '/') === 0) ? $real : null;
     }
 
     function run()
@@ -135,8 +235,8 @@ class piper_tts extends module
         $current = $this->config['MODEL'];
         foreach ($data as $name => $info) {
             $models[] = array(
-                'VALUE' => $name,
-                'TITLE' => $name,
+                'VALUE' => $this->e($name),
+                'TITLE' => $this->e($name),
                 'SELECTED' => $name === $current ? 'selected' : '',
             );
         }
@@ -154,8 +254,8 @@ class piper_tts extends module
         foreach ($files as $f) {
             $name = basename(dirname($f)) . '/' . basename($f);
             $models[] = array(
-                'VALUE' => $f,
-                'TITLE' => $name,
+                'VALUE' => $this->e($f),
+                'TITLE' => $this->e($name),
                 'SELECTED' => $f === $current ? 'selected' : '',
             );
         }
@@ -207,8 +307,7 @@ class piper_tts extends module
         if (gr('cmd') == 'check_piper_status') {
             while (ob_get_level()) ob_end_clean();
             header('Content-Type: application/json');
-            $arch = trim((string)shell_exec('uname -m'));
-            $arch64 = in_array($arch, ['x86_64', 'amd64', 'aarch64']);
+            $arch64 = $this->isArch64();
             if ($this->isRemoteMode()) {
                 $addr = $this->getRemoteAddr();
                 $ch = curl_init("http://$addr/voices");
@@ -232,7 +331,15 @@ class piper_tts extends module
             } else {
                 $install = 'not_installed';
             }
-            echo json_encode(array('connect' => $connect, 'install' => $install, 'arch64' => $arch64));
+            // Синтез и канал доставки — разные вещи: доступность Piper ничего
+            // не говорит о том, дойдёт ли WAV до вкладки браузера.
+            echo json_encode(array(
+                'connect' => $connect,
+                'install' => $install,
+                'arch64' => $arch64,
+                'ws' => $this->isWsAlive() ? 'connected' : 'not_connected',
+                'ws_port' => $this->getWsPort(),
+            ));
             exit;
         }
 
@@ -246,9 +353,20 @@ class piper_tts extends module
 
         if (gr('cmd') == 'install_model') {
             if (function_exists('DebMes')) DebMes("piper_tts: install_model START", 'piper_tts');
-            $voice = gr('voice');
-            $quality = gr('quality');
-            $modelDir = $this->config['MODELS_DIR'] . '/ru_RU-' . $voice . '-' . $quality;
+            // Вкладка «Модели» скрыта в удалённом режиме, но команда оставалась
+            // доступна напрямую из адресной строки.
+            if ($this->isRemoteMode()) {
+                $this->fatal(LANG_PIPER_TTS_REMOTE_MODE_ERROR);
+            }
+            $voice = $this->sanitizeVoice(gr('voice'));
+            $quality = $this->sanitizeQuality(gr('quality'));
+            if ($voice === null || $quality === null) {
+                $this->fatal(LANG_PIPER_TTS_INVALID_MODEL);
+            }
+            $modelDir = $this->resolveModelDir($voice, $quality);
+            if ($modelDir === null) {
+                $this->fatal(LANG_PIPER_TTS_INVALID_MODEL);
+            }
             $parentDir = dirname($modelDir);
             exec('chown -R www-data:www-data ' . escapeshellarg($parentDir) . ' 2>/dev/null');
             if (!is_dir($modelDir)) mkdir($modelDir, 0755, true);
@@ -339,9 +457,18 @@ class piper_tts extends module
 
         if (gr('cmd') == 'delete_model') {
             if (function_exists('DebMes')) DebMes("piper_tts: delete_model START", 'piper_tts');
-            $voice = gr('voice');
-            $quality = gr('quality');
-            $modelDir = $this->config['MODELS_DIR'] . '/ru_RU-' . $voice . '-' . $quality;
+            if ($this->isRemoteMode()) {
+                $this->fatal(LANG_PIPER_TTS_REMOTE_MODE_ERROR);
+            }
+            $voice = $this->sanitizeVoice(gr('voice'));
+            $quality = $this->sanitizeQuality(gr('quality'));
+            if ($voice === null || $quality === null) {
+                $this->fatal(LANG_PIPER_TTS_INVALID_MODEL);
+            }
+            $modelDir = $this->resolveModelDir($voice, $quality);
+            if ($modelDir === null) {
+                $this->fatal(LANG_PIPER_TTS_INVALID_MODEL);
+            }
             if (function_exists('DebMes')) DebMes("piper_tts: deleting $modelDir", 'piper_tts');
             if (is_dir($modelDir)) {
                 exec('rm -rf ' . escapeshellarg($modelDir) . ' 2>&1', $rmOut, $rmRet);
@@ -363,7 +490,7 @@ class piper_tts extends module
 
         $isRemote = $this->isRemoteMode();
         $out['IS_REMOTE'] = $isRemote ? '1' : '';
-        $out['PIPER_BIN'] = $this->config['PIPER_BIN'];
+        $out['PIPER_BIN'] = $this->e($this->config['PIPER_BIN']);
 
         if ($isRemote) {
             $model = $this->config['MODEL'];
@@ -374,21 +501,20 @@ class piper_tts extends module
             }
             $out['REMOTE_MODELS'] = $this->fetchRemoteVoices();
         } else {
-            $out['MODELS_DIR'] = $this->config['MODELS_DIR'];
+            $out['MODELS_DIR'] = $this->e($this->config['MODELS_DIR']);
             $out['MODELS'] = $this->scanModels($this->config['MODELS_DIR']);
             $out['AVAILABLE_MODELS'] = $this->getAvailableModels();
         }
 
-        $out['LENGTH_SCALE'] = $this->config['LENGTH_SCALE'];
-        $out['SENTENCE_SILENCE'] = $this->config['SENTENCE_SILENCE'];
+        $out['LENGTH_SCALE'] = $this->e($this->config['LENGTH_SCALE']);
+        $out['SENTENCE_SILENCE'] = $this->e($this->config['SENTENCE_SILENCE']);
         $out['USE_CACHE'] = $this->config['USE_CACHE'] ? 'checked' : '';
-        $out['CACHE_DIR'] = $this->config['CACHE_DIR'];
+        $out['CACHE_DIR'] = $this->e($this->config['CACHE_DIR']);
         $out['CACHE_CLEANUP'] = $this->config['CACHE_CLEANUP'] ? 'checked' : '';
-        $out['WS_PORT'] = $this->config['WS_PORT'];
+        $out['WS_PORT'] = $this->e($this->getWsPort());
 
-        $arch = trim((string)shell_exec('uname -m'));
-        $arch64 = in_array($arch, ['x86_64', 'amd64', 'aarch64']);
-        $out['ARCH_64'] = $arch64 ? '1' : '';
+        $out['ARCH_64'] = $this->isArch64() ? '1' : '';
+        $out['WS_ALIVE'] = $this->isWsAlive() ? '1' : '';
 
         if ($isRemote) {
             $addr = $this->getRemoteAddr();
@@ -421,7 +547,7 @@ class piper_tts extends module
         $out['TAB_SETTINGS'] = ($tab == 'settings') ? '1' : '0';
         $out['TAB_MODELS'] = ($tab == 'models') ? '1' : '0';
         $out['TAB_HELP'] = ($tab == 'help') ? '1' : '0';
-        $out['VERSION'] = '1.0.3';
+        $out['VERSION'] = '1.1.0';
 
         if ($this->view_mode == 'update_settings') {
             $piperBin = gr('piper_bin', $this->config['PIPER_BIN']);
@@ -450,7 +576,7 @@ class piper_tts extends module
         $this->admin($out);
     }
 
-    private function pluralize($n, $forms)
+    public static function pluralize($n, $forms)
     {
         $n = abs((int)$n) % 100;
         $n1 = $n % 10;
@@ -460,7 +586,7 @@ class piper_tts extends module
         return $forms[2];
     }
 
-    private function numberToText($n)
+    public static function numberToText($n)
     {
         $n = (int)$n;
         if ($n === 0) return 'ноль';
@@ -492,7 +618,7 @@ class piper_tts extends module
         return trim($result);
     }
 
-    private function expandDecimal($str)
+    public static function expandDecimal($str)
     {
         if (!preg_match('/^(\d+)[.,](\d+)$/', $str, $m)) {
             return $str;
@@ -501,60 +627,64 @@ class piper_tts extends module
         $frac = $m[2];
         $fracInt = (int)$frac;
         if ($fracInt === 0) {
-            return $this->numberToText($whole);
+            return self::numberToText($whole);
         }
-        $wholeText = $this->numberToText($whole);
+        $wholeText = self::numberToText($whole);
         if (strlen($frac) === 1 && $fracInt === 5) {
             return $wholeText . ' с половиной';
         }
         if (strlen($frac) === 1) {
-            $fracText = $this->numberToText($fracInt);
-            $fracWord = $this->pluralize($fracInt, array('десятая', 'десятых', 'десятых'));
+            $fracText = self::numberToText($fracInt);
+            $fracWord = self::pluralize($fracInt, array('десятая', 'десятых', 'десятых'));
             return $wholeText . ' целых ' . $fracText . ' ' . $fracWord;
         }
-        return $wholeText . ' целых ' . $this->numberToText($fracInt);
+        return $wholeText . ' целых ' . self::numberToText($fracInt);
     }
 
-    private function preprocessText($text)
+    public static function preprocessText($text)
     {
+        // Составные единицы: без замены «м/с» превращается в «м с».
+        $text = preg_replace('/км\s*\/\s*ч/ui', 'километров в час', $text);
+        $text = preg_replace('/м\s*\/\s*с/ui', 'метров в секунду', $text);
+
         $text = preg_replace_callback('/(\d+(?:[.,]\d+)?)\s*°\s*C/ui', function($m) {
             $num = str_replace(',', '.', $m[1]);
             if (strpos($num, '.') !== false) {
                 $whole = (int)$num;
-                return $this->expandDecimal($num) . ' ' . $this->pluralize($whole, array('градус', 'градуса', 'градусов'));
+                return self::expandDecimal($num) . ' ' . self::pluralize($whole, array('градус', 'градуса', 'градусов'));
             }
-            return $m[1] . ' ' . $this->pluralize((int)$num, array('градус', 'градуса', 'градусов'));
+            return $m[1] . ' ' . self::pluralize((int)$num, array('градус', 'градуса', 'градусов'));
         }, $text);
 
         $text = preg_replace_callback('/(\d+(?:[.,]\d+)?)\s*%/u', function($m) {
             $num = str_replace(',', '.', $m[1]);
             if (strpos($num, '.') !== false) {
                 $whole = (int)$num;
-                return $this->expandDecimal($num) . ' ' . $this->pluralize($whole, array('процент', 'процента', 'процентов'));
+                return self::expandDecimal($num) . ' ' . self::pluralize($whole, array('процент', 'процента', 'процентов'));
             }
-            return $m[1] . ' ' . $this->pluralize((int)$num, array('процент', 'процента', 'процентов'));
+            return $m[1] . ' ' . self::pluralize((int)$num, array('процент', 'процента', 'процентов'));
         }, $text);
 
         $text = preg_replace_callback('/(\d+(?:[.,]\d+)?)\s*мм\s+рт\.?\s*ст\.?/ui', function($m) {
             $num = str_replace(',', '.', $m[1]);
             if (strpos($num, '.') !== false) {
                 $whole = (int)$num;
-                return $this->expandDecimal($num) . ' ' . $this->pluralize($whole, array('миллиметр', 'миллиметра', 'миллиметров')) . ' ртутного столба';
+                return self::expandDecimal($num) . ' ' . self::pluralize($whole, array('миллиметр', 'миллиметра', 'миллиметров')) . ' ртутного столба';
             }
-            return $m[1] . ' ' . $this->pluralize((int)$num, array('миллиметр', 'миллиметра', 'миллиметров')) . ' ртутного столба';
+            return $m[1] . ' ' . self::pluralize((int)$num, array('миллиметр', 'миллиметра', 'миллиметров')) . ' ртутного столба';
         }, $text);
 
         $text = preg_replace_callback('/(\d+(?:[.,]\d+)?)\s*мм\b/u', function($m) {
             $num = str_replace(',', '.', $m[1]);
             if (strpos($num, '.') !== false) {
                 $whole = (int)$num;
-                return $this->expandDecimal($num) . ' ' . $this->pluralize($whole, array('миллиметр', 'миллиметра', 'миллиметров'));
+                return self::expandDecimal($num) . ' ' . self::pluralize($whole, array('миллиметр', 'миллиметра', 'миллиметров'));
             }
-            return $m[1] . ' ' . $this->pluralize((int)$num, array('миллиметр', 'миллиметра', 'миллиметров'));
+            return $m[1] . ' ' . self::pluralize((int)$num, array('миллиметр', 'миллиметра', 'миллиметров'));
         }, $text);
 
         $text = preg_replace_callback('/\b(\d+)[.,](\d+)\b/u', function($m) {
-            return $this->expandDecimal($m[1] . '.' . $m[2]);
+            return self::expandDecimal($m[1] . '.' . $m[2]);
         }, $text);
 
         $tzPos = array(
@@ -605,27 +735,173 @@ class piper_tts extends module
         return $text;
     }
 
+    /**
+     * Очистка текста перед синтезом.
+     *
+     * Piper строит просодию по пунктуации, поэтому знаки препинания сохраняются:
+     * прежняя фильтрация [^\p{L}\p{N}\s] выбрасывала всё, и речь становилась
+     * монотонной — без пауз между предложениями и без вопросительной интонации.
+     * Удаляются только символы, которые несут для движка никакой информации
+     * (кавычки, скобки, служебные знаки, управляющие коды).
+     */
+    public static function cleanText($message)
+    {
+        $clean = self::preprocessText($message);
+        $clean = str_replace(array("\r\n", "\r", "\n", "\t"), ' ', $clean);
+        $clean = preg_replace('/[^\p{L}\p{N}\s.,!?;:\x{2013}\x{2014}\x{2019}\x{201C}\x{201D}\x{2026}()-]/u', ' ', $clean);
+        $clean = preg_replace('/\s+/u', ' ', $clean);
+        return trim($clean);
+    }
+
+    /**
+     * Разбивает текст на предложения по знакам конца.
+     * Используется только в удалённом режиме, где сервер не умеет sentence_silence.
+     */
+    private function splitSentences($text)
+    {
+        $parts = preg_split('/(?<=[.!?…])\s+/u', $text, -1, PREG_SPLIT_NO_EMPTY);
+        if (!is_array($parts)) {
+            return array($text);
+        }
+        $parts = array_values(array_filter(array_map('trim', $parts), function($p) {
+            return $p !== '';
+        }));
+        return count($parts) > 0 ? $parts : array($text);
+    }
+
+    private function requestRemoteSynthesis($text, $path)
+    {
+        $addr = $this->getRemoteAddr();
+        // Сервер piper1-gpl принимает length_w_scale, а не noise_w: имя noise_w
+        // он молча игнорирует, и ширина фонем оставалась на значении по умолчанию.
+        $payload = json_encode(array(
+            'text' => $text,
+            'voice' => $this->config['MODEL'],
+            'length_scale' => (float)$this->config['LENGTH_SCALE'],
+            'noise_scale' => 0.667,
+            'length_w_scale' => 0.8,
+        ));
+        CreateDir(dirname($path));
+        $fp = @fopen($path, 'w');
+        if ($fp === false) {
+            if (function_exists('DebMes')) DebMes("piper_tts: cannot open $path for writing", 'piper_tts');
+            return false;
+        }
+        $ch = curl_init("http://$addr/");
+        curl_setopt_array($ch, array(
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => array('Content-Type: application/json'),
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_FILE => $fp,
+        ));
+        $res = curl_exec($ch);
+        $err = curl_error($ch);
+        curl_close($ch);
+        fclose($fp);
+        if ($res === false && function_exists('DebMes')) {
+            DebMes("piper_tts: remote synthesis failed: $err", 'piper_tts');
+        }
+        return $res !== false && file_exists($path) && filesize($path) > 0;
+    }
+
+    /**
+     * Удалённый сервер не поддерживает паузу между предложениями (это аргумент
+     * его запуска, а не поле JSON-запроса), поэтому пауза собирается локально:
+     * предложения синтезируются по отдельности и склеиваются тишиной нужной
+     * длины. Наивная отправка sentence_silence в payload не давала ничего.
+     */
+    private function synthesizeRemoteWithSilence($text, $path)
+    {
+        $silence = (float)$this->config['SENTENCE_SILENCE'];
+        $sentences = $this->splitSentences($text);
+
+        if ($silence <= 0 || count($sentences) < 2) {
+            return $this->requestRemoteSynthesis($text, $path);
+        }
+
+        $workDir = $path . '.parts';
+        CreateDir($workDir);
+        $parts = array();
+        $ok = true;
+        foreach ($sentences as $i => $sentence) {
+            $partFile = $workDir . '/part' . $i . '.wav';
+            if (!$this->requestRemoteSynthesis($sentence, $partFile)) {
+                $ok = false;
+                break;
+            }
+            $parts[] = $partFile;
+        }
+
+        if (!$ok || count($parts) < 2) {
+            $this->removeDir($workDir);
+            return $this->requestRemoteSynthesis($text, $path);
+        }
+
+        $gap = $workDir . '/gap.wav';
+        $samples = (int)round(22050 * $silence);
+        exec('ffmpeg -y -f lavfi -i anullsrc=r=22050:cl=mono -t ' .
+            escapeshellarg((string)$silence) . ' -c:a pcm_s16le ' . escapeshellarg($gap) . ' 2>/dev/null');
+        if (!file_exists($gap)) {
+            $this->removeDir($workDir);
+            return $this->requestRemoteSynthesis($text, $path);
+        }
+
+        $listFile = $workDir . '/concat.txt';
+        $lines = '';
+        foreach ($parts as $partFile) {
+            $lines .= "file '" . str_replace("'", "'\\''", $partFile) . "'\n";
+        }
+        // Пауза добавляется между предложениями, но не после последнего.
+        for ($i = 0; $i < count($parts) - 1; $i++) {
+            $lines .= "file '" . str_replace("'", "'\\''", $gap) . "'\n";
+        }
+        file_put_contents($listFile, $lines);
+
+        exec('ffmpeg -y -f concat -safe 0 -i ' . escapeshellarg($listFile) .
+            ' -c copy ' . escapeshellarg($path) . ' 2>/dev/null');
+        $this->removeDir($workDir);
+
+        if (file_exists($path) && filesize($path) > 0) {
+            return true;
+        }
+        return $this->requestRemoteSynthesis($text, $path);
+    }
+
+    private function removeDir($dir)
+    {
+        if (!is_dir($dir)) return;
+        foreach (glob($dir . '/*') as $f) {
+            if (is_file($f)) @unlink($f);
+        }
+        @rmdir($dir);
+    }
+
+    /**
+     * Пауза перед началом фразы. Без неё первые миллисекунды WAV теряются на
+     * стороне проигрывателя: файл стартует, но начало уже проигнорировано.
+     * Настраивается строкой LEAD_SILENCE в таблице settings, 0 отключает.
+     */
+    private function getLeadSilence()
+    {
+        if (isset($this->config['LEAD_SILENCE']) && trim((string)$this->config['LEAD_SILENCE']) !== '') {
+            return max(0.0, (float)$this->config['LEAD_SILENCE']);
+        }
+        return 1.0;
+    }
+
     private function synthesizeToFile($message, $path)
     {
-        $clean = $this->preprocessText($message);
-        $clean = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $clean);
-        $clean = preg_replace('/\s+/', ' ', $clean);
-        $clean = trim($clean);
+        $clean = self::cleanText($message);
+        if ($clean === '') {
+            return;
+        }
 
         if ($this->isRemoteMode()) {
-            $addr = $this->getRemoteAddr();
-            $url = "http://$addr/";
-            $payload = json_encode(array(
-                'text' => $clean,
-                'voice' => $this->config['MODEL'],
-                'length_scale' => (float)$this->config['LENGTH_SCALE'],
-                'noise_scale' => 0.667,
-                'noise_w' => 0.8,
-            ));
-            $cmd = 'curl -s -X POST -H "Content-Type: application/json" -d ' .
-                escapeshellarg($payload) . ' -o ' . escapeshellarg($path) . ' ' .
-                escapeshellarg($url);
-            exec($cmd . ' 2>&1', $out, $ret);
+            $ok = $this->synthesizeRemoteWithSilence($clean, $path);
         } else {
             $bin = $this->config['PIPER_BIN'];
             $model = $this->config['MODEL'];
@@ -639,17 +915,66 @@ class piper_tts extends module
                 ' --noise-scale 0.667 --noise-w 0.8' .
                 ' --output-file ' . escapeshellarg($path);
             exec($cmd . ' 2>&1', $out, $ret);
+            $ok = ($ret === 0 && file_exists($path));
         }
 
-        if ($ret === 0 && file_exists($path)) {
-            $tmpPath = $path . '.tmp';
-            exec('ffmpeg -y -i ' . escapeshellarg($path) .
-                ' -af "loudnorm=I=-16:LRA=7:TP=-1.5" ' .
-                escapeshellarg($tmpPath) . ' 2>/dev/null');
-            if (file_exists($tmpPath)) {
-                rename($tmpPath, $path);
+        if (!$ok) {
+            if (function_exists('DebMes')) DebMes("piper_tts: synthesis failed for: $path", 'piper_tts');
+            return;
+        }
+
+        // Расширение .tmp ffmpeg не распознаёт: «Error initializing the muxer».
+        // Из-за этого шаг молча пропускался, в кэш попадал сырой выход Piper
+        // с пиком 0.0 dB — клиппинг срезал атаку первого слога, и начало фразы
+        // звучало как съеденное. Формат задаём явно, поломку больше не глотаем.
+        $tmpPath = $path . '.tmp.wav';
+        $filters = array('loudnorm=I=-16:LRA=7:TP=-1.5');
+        $lead = $this->getLeadSilence();
+        if ($lead > 0) {
+            $filters[] = 'adelay=' . (int)round($lead * 1000);
+        }
+        // loudnorm считает внутри на 192 кГц и без -ar протаскивает эту частоту
+        // в результат: файл вырастает в десять раз. Возвращаем частоту исходника,
+        // потому что у голосов разных классов она разная (16 и 22.05 кГц).
+        $srcRate = 22050;
+        $probe = @shell_exec('ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate' .
+            ' -of csv=p=0 ' . escapeshellarg($path) . ' 2>/dev/null');
+        if (is_string($probe) && (int)trim($probe) > 0) {
+            $srcRate = (int)trim($probe);
+        }
+        exec('ffmpeg -y -i ' . escapeshellarg($path) .
+            ' -af ' . escapeshellarg(implode(',', $filters)) .
+            ' -ar ' . $srcRate . ' -f wav -c:a pcm_s16le ' .
+            escapeshellarg($tmpPath) . ' 2>&1', $ffOut, $ffRet);
+        if ($ffRet === 0 && file_exists($tmpPath) && filesize($tmpPath) > 0) {
+            rename($tmpPath, $path);
+        } else {
+            @unlink($tmpPath);
+            if (function_exists('DebMes')) {
+                DebMes("piper_tts: post-processing failed for: $path (ffmpeg rc=$ffRet) " .
+                    trim(implode(' ', $ffOut)), 'piper_tts');
             }
         }
+    }
+
+    private function cacheKeyPart($value)
+    {
+        $value = (string)$value;
+        return strlen($value) . ':' . $value;
+    }
+
+    private function getCacheKey($message)
+    {
+        // Ключ обязан зависеть от всех параметров синтеза: иначе после смены
+        // голоса или скорости на повторе той же фразы отдаётся WAV,
+        // синтезированный со старыми настройками.
+        // Каждое поле с префиксом длины — конкатенация однозначна для любых
+        // строк, поэтому склейка разных полей не даёт коллизий.
+        return $this->cacheKeyPart($message)
+            . $this->cacheKeyPart($this->config['MODEL'])
+            . $this->cacheKeyPart($this->config['LENGTH_SCALE'])
+            . $this->cacheKeyPart($this->config['SENTENCE_SILENCE'])
+            . $this->cacheKeyPart($this->getLeadSilence());
     }
 
     function processSubscription($event, &$details)
@@ -674,7 +999,7 @@ class piper_tts extends module
 
         $cacheDir = $this->config['CACHE_DIR'];
         $useCache = (int)$this->config['USE_CACHE'] === 1;
-        $md5 = md5($message);
+        $md5 = md5($this->getCacheKey($message));
         $wavFile = $cacheDir . '/piper_tts_' . $md5 . '.wav';
 
         CreateDir($cacheDir);
@@ -694,8 +1019,18 @@ class piper_tts extends module
             return;
         }
 
-        $docRoot = isset($_SERVER['DOCUMENT_ROOT']) ? rtrim($_SERVER['DOCUMENT_ROOT'], '/') : '/var/www/html';
-        $webPath = str_replace($docRoot, '', $wavFile);
+        // CACHE_DIR — это путь в файловой системе, а DOCUMENT_ROOT в CLI-контексте
+        // существует, но пуст, из-за чего в браузер уходил абсолютный путь ФС.
+        // Опорой служит ROOT ядра (он равен DOC_ROOT в конфигурации MajorDomo).
+        $root = defined('ROOT') ? rtrim(ROOT, '/') : '';
+        if ($root !== '' && strpos($wavFile, $root . '/') === 0) {
+            $webPath = substr($wavFile, strlen($root));
+        } else {
+            $docRoot = isset($_SERVER['DOCUMENT_ROOT']) && $_SERVER['DOCUMENT_ROOT'] !== ''
+                ? rtrim($_SERVER['DOCUMENT_ROOT'], '/')
+                : '/var/www/html';
+            $webPath = str_replace($docRoot, '', $wavFile);
+        }
         $webPath = str_replace('\\', '/', $webPath);
         $url = '/' . ltrim($webPath, '/');
 
@@ -720,7 +1055,8 @@ class piper_tts extends module
         ), "PostEvent");
 
         if (function_exists('DebMes')) {
-            DebMes("piper_tts: postToWebSocket result=" . ($result === false ? 'false' : 'ok') . " url=$url", 'piper_tts');
+            DebMes("piper_tts: postToWebSocket result=" . ($result === false ? 'false' : 'ok') .
+                " ws_port=" . $this->getWsPort() . " url=$url", 'piper_tts');
         }
     }
 
@@ -742,7 +1078,7 @@ class piper_tts extends module
         $setupScript = '/tmp/piper_install.sh';
         $setupLog = '/tmp/piper_install.log';
         $marker = '/tmp/piper-tts-installing';
-        $arch = trim((string)shell_exec('uname -m'));
+        $arch = $this->getArch();
         file_put_contents($marker, '1');
         $scriptContent = <<<SETUP
 #!/usr/bin/env bash
@@ -799,6 +1135,10 @@ SETUP;
         $htaccessPath = ROOT . '.htaccess';
 
         if (!file_exists($loaderPath)) {
+            // На PHP 8.1+ mysqli по умолчанию работает в режиме MYSQLI_REPORT_STRICT
+            // и бросает mysqli_sql_exception, поэтому проверка "if (!$link)" больше
+            // не срабатывает: без try/catch падение БД превращается в фатальную
+            // ошибку на каждом HTTP-запросе.
             $loaderContent = <<<'PHP'
 <?php
 if (PHP_SAPI === 'cli') return;
@@ -807,20 +1147,27 @@ $configFile = __DIR__ . '/../config.php';
 if (!file_exists($configFile)) return;
 include_once $configFile;
 
-$link = @mysqli_connect(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
-if (!$link) return;
+$link = null;
+try {
+    $link = mysqli_connect(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
+    if (!$link) return;
 
-$result = mysqli_query($link, "SELECT NAME FROM project_modules WHERE HIDDEN=0");
-if (!$result) { mysqli_close($link); return; }
+    $result = mysqli_query($link, "SELECT NAME FROM project_modules WHERE HIDDEN=0");
+    if (!$result) return;
 
-while ($row = mysqli_fetch_assoc($result)) {
-    $prepend = __DIR__ . '/' . $row['NAME'] . '/prepend.php';
-    if (file_exists($prepend)) {
-        include_once $prepend;
+    while ($row = mysqli_fetch_assoc($result)) {
+        $prepend = __DIR__ . '/' . $row['NAME'] . '/prepend.php';
+        if (file_exists($prepend)) {
+            include_once $prepend;
+        }
+    }
+} catch (Throwable $e) {
+    return;
+} finally {
+    if ($link instanceof mysqli) {
+        @mysqli_close($link);
     }
 }
-
-mysqli_close($link);
 PHP;
             file_put_contents($loaderPath, $loaderContent);
             $log('install: created modules/prepend.php');
@@ -858,13 +1205,15 @@ PHP;
 
         // Проверить, установлен ли Vosk (тоже использует общий загрузчик)
         $voskStillInstalled = false;
-        $link = @mysqli_connect(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
-        if ($link) {
-            $res = mysqli_query($link, "SELECT ID FROM project_modules WHERE NAME='vosk' AND HIDDEN=0");
-            if ($res && mysqli_num_rows($res) > 0) {
+        try {
+            $res = SQLSelect("SELECT ID FROM project_modules WHERE NAME='vosk' AND HIDDEN=0");
+            if (is_array($res) && count($res) > 0) {
                 $voskStillInstalled = true;
             }
-            mysqli_close($link);
+        } catch (Throwable $e) {
+            // При недоступной БД считаем, что Vosk ещё стоит, и ничего не удаляем:
+            // это безопаснее, чем снести загрузчик, который может быть нужен.
+            $voskStillInstalled = true;
         }
 
         if (!$voskStillInstalled) {

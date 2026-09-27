@@ -93,15 +93,26 @@
   x.onload=function(){
    if(x.status!=200)return;
    try{var r=JSON.parse(x.responseText)}catch(e){return}
-   var cd=document.getElementById('connect_status_dot');
-   var ct=document.getElementById('connect_status_text');
-   if(cd&&ct){
-    if(r.connect=='connected'){
-     cd.style.background='#28a745';ct.style.color='#28a745';ct.textContent='<#LANG_PIPER_TTS_CONNECTED#>';
-    }else{
-     cd.style.background='#dc3545';ct.style.color='#dc3545';ct.textContent='<#LANG_PIPER_TTS_DISCONNECTED#>';
+    var cd=document.getElementById('connect_status_dot');
+    var ct=document.getElementById('connect_status_text');
+    if(cd&&ct){
+     if(r.connect=='connected'){
+      cd.style.background='#28a745';ct.style.color='#28a745';ct.textContent='<#LANG_PIPER_TTS_CONNECTED#>';
+     }else{
+      cd.style.background='#dc3545';ct.style.color='#dc3545';ct.textContent='<#LANG_PIPER_TTS_DISCONNECTED#>';
+     }
     }
-   }
+    // Синтез и доставка — независимые вещи: зелёная точка Piper не означает,
+    // что аудио дойдёт до вкладки, если WebSocket-сервер не поднят.
+    var wd=document.getElementById('ws_status_dot');
+    var wt=document.getElementById('ws_status_text');
+    if(wd&&wt){
+     if(r.ws=='connected'){
+      wd.style.background='#28a745';wt.style.color='#28a745';wt.textContent='<#LANG_PIPER_TTS_WS_CONNECTED#>';
+     }else{
+      wd.style.background='#dc3545';wt.style.color='#dc3545';wt.textContent='<#LANG_PIPER_TTS_WS_DISCONNECTED#>';
+     }
+    }
 [#if IS_REMOTE=""#][#if ARCH_64="1"#]
    var id=document.getElementById('install_status_dot');
    var it=document.getElementById('install_status_text');

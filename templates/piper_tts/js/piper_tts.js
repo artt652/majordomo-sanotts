@@ -3,21 +3,65 @@
   var host = window.location.hostname;
   var port = window.PIPER_WS_PORT || 8001;
 
-  function connect() {
-    if (ws && ws.readyState === WebSocket.OPEN) return;
-    ws = new WebSocket('ws://' + host + ':' + port + '/majordomo');
+  function warn(msg, err) {
+    if (window.console) window.console.warn('piper_tts: ' + msg, err);
+  }
 
-    ws.onopen = function () {
-      ws.send(JSON.stringify({
-        action: 'subscribe',
-        data: {
-          TYPE: 'events',
-          EVENTS: 'PIPER_TTS'
-        }
-      }));
+  // Раньше play() вызывался сразу после присваивания src, то есть файл ещё не
+  // был докачан. Медиа-конвейер в этом случае стартует не с нулевого смещения,
+  // а проматывает начало, чтобы догнать реальное время, — и старт фразы
+  // терялся. Поэтому сначала ждём HAVE_ENOUGH_DATA, и только потом играем.
+  function playSound(url) {
+    var audio = new Audio();
+    audio.preload = 'auto';
+    audio.src = url;
+
+    var started = false;
+    function begin() {
+      if (started) return;
+      started = true;
+      var played = audio.play();
+      if (played && played.catch) {
+        // Браузер блокирует автовоспроизведение без жеста пользователя;
+        // раньше отказ просто проглатывался и звук не появлялся без причины.
+        played.catch(function (err) { warn('не удалось воспроизвести', err); });
+      }
+    }
+
+    if (audio.readyState >= 4) {
+      begin();
+      return;
+    }
+    audio.addEventListener('canplaythrough', begin, { once: true });
+    audio.addEventListener('error', function () { warn('ошибка загрузки ' + url); }, { once: true });
+    audio.load();
+    // Страховка: если событие не придёт (бывает на части браузеров), играем
+    // по таймеру — тишина в начале файла уже страхует от потери старта.
+    setTimeout(begin, 3000);
+  }
+
+  function connect() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    // Обработчики должны работать именно с этим сокетом: обращение к общей
+    // переменной ws давало "Cannot read properties of null (reading 'close')",
+    // когда onclose успевал обнулить ws до срабатывания onerror.
+    var sock = new WebSocket('ws://' + host + ':' + port + '/majordomo');
+    ws = sock;
+
+    sock.onopen = function () {
+      if (sock.readyState !== WebSocket.OPEN) return;
+      try {
+        sock.send(JSON.stringify({
+          action: 'subscribe',
+          data: {
+            TYPE: 'events',
+            EVENTS: 'PIPER_TTS'
+          }
+        }));
+      } catch (e) {}
     };
 
-    ws.onmessage = function (evt) {
+    sock.onmessage = function (evt) {
       try {
         var msg = JSON.parse(evt.data);
         if (msg.action === 'subscribed') return;
@@ -27,21 +71,22 @@
         if (payload.EVENT_DATA.NAME !== 'PIPER_TTS') return;
         var data = payload.EVENT_DATA.VALUE;
         if (data && data.COMMAND === 'PlayAudio' && data.URL) {
-          var audio = new Audio(data.URL);
-          audio.play().catch(function () {});
+          playSound(data.URL);
         }
       } catch (e) {}
     };
 
-    ws.onclose = function () {
-      ws = null;
+    sock.onclose = function () {
+      if (ws === sock) ws = null;
       if (!document.hidden) {
         setTimeout(connect, 5000);
       }
     };
 
-    ws.onerror = function () {
-      ws.close();
+    sock.onerror = function () {
+      try {
+        sock.close();
+      } catch (e) {}
     };
   }
 

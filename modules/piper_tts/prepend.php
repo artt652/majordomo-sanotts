@@ -21,7 +21,13 @@ ob_start(function ($buffer) {
         $buffer = gzdecode($buffer);
         if ($buffer === false) return false;
     }
-    $script = '<script>if(window.top===window.self){var s=document.createElement("script");s.src="/templates/piper_tts/js/piper_tts.js?' . filemtime(__FILE__) . '";document.body.appendChild(s)}</script>';
+    // Версия в URL должна строиться по времени изменения самого скрипта.
+    // При filemtime(__FILE__) любая правка JS оставляла бы URL прежним, и
+    // браузер продолжал бы отдавать старую версию из своего кэша: у Apache
+    // для этого файла нет Cache-Control, только Last-Modified + ETag.
+    $jsFile = __DIR__ . '/../../templates/piper_tts/js/piper_tts.js';
+    $jsVer = is_file($jsFile) ? (string)filemtime($jsFile) : (string)filemtime(__FILE__);
+    $script = '<script>if(window.top===window.self){var s=document.createElement("script");s.src="/templates/piper_tts/js/piper_tts.js?' . $jsVer . '";document.body.appendChild(s)}</script>';
     if (($pos = stripos($buffer, '</body>')) !== false) {
         $buffer = substr_replace($buffer, $script . "\n</body>", $pos, 7);
     } else {
