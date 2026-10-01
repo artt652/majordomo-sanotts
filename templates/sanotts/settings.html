@@ -1,0 +1,345 @@
+<style>
+/* Галочки — без .checkbox из темы (у тем MajorDoMo свои отступы и float/absolute у флажка).
+   Слева у строк с галочками — такая же пустая подпись control-label, как у полей: admin.css
+   делает эту колонку фиксированной (240 px), и отступ в процентах с ней не совпадал. */
+.sanotts-check label{display:flex;align-items:flex-start;margin:0;padding:0;font-weight:normal;cursor:pointer;line-height:20px}
+@media (max-width:1199px){.sanotts-pad{display:none!important}}
+/* Кнопки пресетов — сеткой 3×2, одинаковой ширины. */
+.sanotts-presets{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.sanotts-presets .btn{width:100%;margin:0;padding-left:4px;padding-right:4px;overflow:hidden;text-overflow:ellipsis}
+.sanotts-check input[type=checkbox]{position:static;float:none;flex:0 0 auto;width:auto;height:auto;margin:3px 8px 0 0}
+</style>
+<form action="?" method="post" enctype="multipart/form-data" name="frmEdit" class="form-horizontal">
+ <input type="hidden" name="mode" value="update">
+ <input type="hidden" name="tab" value="settings">
+ <input type="hidden" name="view_mode" value="update_settings">
+ <fieldset>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_CLI#></label>
+   <div class="col-lg-6">
+    <input type="text" name="cli" value="[#CLI#]" class="form-control">
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_VOICES_DIR#></label>
+   <div class="col-lg-6">
+    <input type="text" name="voices_dir" value="[#VOICES_DIR#]" class="form-control">
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_VOICE#></label>
+   <div class="col-lg-6">
+    <select name="voice" id="sanotts_voice" class="form-control" onchange="sanottsSample()">
+[#begin VOICES#]
+     <option value="[#VALUE#]" data-lang="[#LANG#]" [#SELECTED#]>[#TITLE#]</option>
+[#end VOICES#]
+    </select>
+[#if VOICE_OK=""#]
+    <span class="help-block" style="color:#a94442;margin-bottom:0"><#LANG_SANOTTS_VOICE_MISSING_HINT#></span>
+[#endif#]
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4" for="sanotts_test_text"><#LANG_SANOTTS_TEST#></label>
+   <div class="col-lg-6">
+    <textarea id="sanotts_test_text" class="form-control" rows="2"></textarea>
+    <button type="button" class="btn btn-default" style="margin-top:8px" onclick="sanottsTest();return false"><span class="glyphicon glyphicon-volume-up"></span> <#LANG_SANOTTS_TEST_BTN#></button>
+    <button type="button" class="btn btn-default" style="margin-top:8px" onclick="sanottsDownload();return false"><span class="glyphicon glyphicon-download-alt"></span> <#LANG_SANOTTS_DOWNLOAD_BTN#></button>
+    <button type="button" class="btn btn-default" style="margin-top:8px" onclick="sanottsExplainTest();return false"><span class="glyphicon glyphicon-search"></span> <#LANG_SANOTTS_EXPLAIN#></button>
+    <span id="sanotts_test_status" style="margin-left:8px"></span>
+    <audio id="sanotts_test_audio" controls style="display:none;width:100%;margin-top:8px"></audio>
+    <div id="sanotts_test_explain"></div>
+    <span class="help-block"><#LANG_SANOTTS_TEST_HINT#></span>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <div class="sanotts-presets">
+    <button type="button" class="btn btn-default btn-sm" onclick="sanottsPreset(1,0,0,0)"><#LANG_SANOTTS_PRESET_NORMAL#></button>
+    <button type="button" class="btn btn-default btn-sm" onclick="sanottsPreset(0.95,-1,3,-5)"><#LANG_SANOTTS_PRESET_SOFT#></button>
+    <button type="button" class="btn btn-default btn-sm" onclick="sanottsPreset(1.05,1,-2,5)"><#LANG_SANOTTS_PRESET_BRIGHT#></button>
+    <button type="button" class="btn btn-default btn-sm" onclick="sanottsPreset(0.95,-4,4,0)"><#LANG_SANOTTS_PRESET_LOW#></button>
+    <button type="button" class="btn btn-default btn-sm" onclick="sanottsPreset(1,4,-3,2)"><#LANG_SANOTTS_PRESET_HIGH#></button>
+    <button type="button" class="btn btn-default btn-sm" onclick="sanottsPreset(0.9,-1,2,2)"><#LANG_SANOTTS_PRESET_ANNOUNCER#></button>
+    </div>
+    <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_PRESET_HINT#></span>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_LENGTH_SCALE#></label>
+   <div class="col-lg-6">
+    <input type="range" name="length_scale" id="sanotts_length_scale" min="0.5" max="2" step="0.01" value="[#LENGTH_SCALE#]" class="form-control" oninput="document.getElementById('lbl_length_scale').textContent=this.value" style="display:inline-block;width:calc(100% - 90px);vertical-align:middle">
+    <span id="lbl_length_scale" style="display:inline-block;width:80px;text-align:center;font-weight:bold">[#LENGTH_SCALE#]</span>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_PITCH#></label>
+   <div class="col-lg-6">
+    <input type="range" name="pitch" id="sanotts_pitch" min="-8" max="8" step="0.5" value="[#PITCH#]" class="form-control" oninput="sanottsShow(this)" style="display:inline-block;width:calc(100% - 90px);vertical-align:middle">
+    <span id="lbl_pitch" data-unit="st" style="display:inline-block;width:80px;text-align:center;font-weight:bold">[#PITCH#]</span>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_BASS#></label>
+   <div class="col-lg-6">
+    <input type="range" name="bass" id="sanotts_bass" min="-12" max="12" step="1" value="[#BASS#]" class="form-control" oninput="sanottsShow(this)" style="display:inline-block;width:calc(100% - 90px);vertical-align:middle">
+    <span id="lbl_bass" data-unit="db" style="display:inline-block;width:80px;text-align:center;font-weight:bold">[#BASS#]</span>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_TREBLE#></label>
+   <div class="col-lg-6">
+    <input type="range" name="treble" id="sanotts_treble" min="-12" max="12" step="1" value="[#TREBLE#]" class="form-control" oninput="sanottsShow(this)" style="display:inline-block;width:calc(100% - 90px);vertical-align:middle">
+    <span id="lbl_treble" data-unit="db" style="display:inline-block;width:80px;text-align:center;font-weight:bold">[#TREBLE#]</span>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_SENTENCE_SILENCE#></label>
+   <div class="col-lg-6">
+    <input type="range" name="sentence_silence" min="0" max="1" step="0.01" value="[#SENTENCE_SILENCE#]" class="form-control" oninput="document.getElementById('lbl_sentence_silence').textContent=this.value" style="display:inline-block;width:calc(100% - 90px);vertical-align:middle">
+    <span id="lbl_sentence_silence" style="display:inline-block;width:80px;text-align:center;font-weight:bold">[#SENTENCE_SILENCE#]</span>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_LEAD_SILENCE#></label>
+   <div class="col-lg-6">
+    <input type="range" name="lead_silence" min="0" max="3" step="0.1" value="[#LEAD_SILENCE#]" class="form-control" oninput="document.getElementById('lbl_lead_silence').textContent=this.value" style="display:inline-block;width:calc(100% - 90px);vertical-align:middle">
+    <span id="lbl_lead_silence" style="display:inline-block;width:80px;text-align:center;font-weight:bold">[#LEAD_SILENCE#]</span>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <div class="sanotts-check">
+     <label><input type="checkbox" name="normalize" value="1" [#NORMALIZE#] onchange="document.getElementById('loudness_wrap').style.display=this.checked?'':'none'"> <#LANG_SANOTTS_NORMALIZE#></label>
+    </div>
+    <div id="loudness_wrap"[#if NORMALIZE=""#] style="display:none"[#endif#]>
+     <input type="range" name="loudness" min="-30" max="-10" step="1" value="[#LOUDNESS#]" class="form-control" oninput="document.getElementById('lbl_loudness').textContent=this.value" style="display:inline-block;width:calc(100% - 90px);vertical-align:middle">
+     <span style="display:inline-block;width:80px;text-align:center;font-weight:bold"><span id="lbl_loudness">[#LOUDNESS#]</span> LUFS</span>
+     <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_LOUDNESS_HINT#></span>
+    </div>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <div class="sanotts-check">
+     <label><input type="checkbox" name="stream" value="1" [#STREAM#]> <#LANG_SANOTTS_STREAM#></label>
+    </div>
+    <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_STREAM_HINT#></span>
+   </div>
+  </div>
+[#if HAS_RUSSIAN="1"#]
+  <div class="form-group">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <input type="hidden" name="ru_rules_shown" value="1">
+    <div class="sanotts-check">
+     <label><input type="checkbox" name="ru_rules" value="1" [#RU_RULES#]> <#LANG_SANOTTS_RU_RULES#></label>
+    </div>
+    <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_RU_RULES_HINT#></span>
+   </div>
+  </div>
+[#endif#]
+[#if HAS_ARABIC="1"#]
+  <div class="form-group">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <input type="hidden" name="tashkeel_shown" value="1">
+    <div class="sanotts-check">
+     <label><input type="checkbox" name="tashkeel" value="1" [#TASHKEEL#]> <#LANG_SANOTTS_TASHKEEL#></label>
+    </div>
+    <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_TASHKEEL_HINT#></span>
+   </div>
+  </div>
+[#endif#]
+  <div class="form-group">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <div class="sanotts-check">
+     <label><input type="checkbox" name="use_cache" value="1" [#USE_CACHE#] onchange="document.getElementById('cache_cleanup_wrap').style.display=this.checked?'':'none'"> <#LANG_SANOTTS_USE_CACHE#></label>
+    </div>
+    <div class="sanotts-check" id="cache_cleanup_wrap" style="margin-top:6px[#if USE_CACHE=""#];display:none[#endif#]">
+     <label><input type="checkbox" name="cache_cleanup" value="1" [#CACHE_CLEANUP#]> <#LANG_SANOTTS_CACHE_CLEANUP#></label>
+    </div>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_CACHE_DIR#></label>
+   <div class="col-lg-6">
+    <input type="text" name="cache_dir" value="[#CACHE_DIR#]" class="form-control">
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_WS_PORT#></label>
+   <div class="col-lg-6">
+    <input type="text" name="ws_port" value="[#WS_PORT#]" class="form-control" style="max-width:120px">
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <input type="submit" name="submit" value="<#LANG_UPDATE#>" class="btn btn-primary">
+   </div>
+  </div>
+ </fieldset>
+</form>
+
+<script>
+var SANOTTS_SAMPLES=[#SAMPLES_JSON#];
+// Пример на языке выбранного голоса. Свой текст не затираем: заменяем, только
+// если в окошке пусто или стоит пример другого языка.
+function sanottsSample(){
+ var sel=document.getElementById('sanotts_voice'),ta=document.getElementById('sanotts_test_text');
+ if(!sel||!ta)return;
+ var o=sel.options[sel.selectedIndex],lang=o?o.getAttribute('data-lang'):'ru';
+ var cur=ta.value.replace(/^\s+|\s+$/g,''),isSample=(cur==='');
+ for(var k in SANOTTS_SAMPLES){if(SANOTTS_SAMPLES[k]===cur){isSample=true;break;}}
+ if(isSample)ta.value=SANOTTS_SAMPLES[lang]||SANOTTS_SAMPLES.ru;
+}
+sanottsSample();
+// По предложениям, как плеер. Запрос test_say запускает синтез задания на
+// сервере; готовые предложения забираются короткими запросами test_poll и
+// играют сразу. Каждый опрос — обычный законченный ответ, поэтому звук
+// начинается сразу, даже если веб-сервер придерживает долгие ответы.
+// Новое нажатие прерывает прежнюю проверку.
+// Текст из окна и голос из списка — для обеих кнопок. Запросы — GET, как у
+// остальных вызовов модуля: на POST admin.php MajorDoMo отдаёт страницу панели,
+// не вызывая обработчик модуля. Текст — в base64url: переносы строк и прочие
+// управляющие символы в адресе (даже как %0A) отвергают сами веб-серверы —
+// lighttpd отвечает 400 Bad Request.
+// Длина текста не ограничена: адрес запроса у веб-серверов короткий (lighttpd,
+// nginx — от 4–8 КБ), поэтому длинный текст сначала уходит на сервер частями
+// (cmd=test_put), а синтез получает только ключ. Переводы строк сохраняются —
+// для русского это паузы.
+// Подпись у ползунков высоты и тембра: «+2 пт», «−3 дБ».
+function sanottsShow(el){
+ var l=document.getElementById('lbl_'+el.name);if(!l)return;
+ var v=parseFloat(el.value),u=l.getAttribute('data-unit')==='st'?' <#LANG_SANOTTS_UNIT_ST#>':' <#LANG_SANOTTS_UNIT_DB#>';
+ l.textContent=(v>0?'+':'')+String(v).replace('-','\u2212')+u;
+}
+// Пресеты: скорость (×), высота, низкие, высокие.
+// Темп модуля обратен скорости: скорость 0,95 = темп 1,05.
+function sanottsPreset(speed,pitch,bass,treble){
+ var set=function(id,v){var e=document.getElementById(id);if(!e)return;e.value=v;if(e.oninput)e.oninput.call(e);};
+ set('sanotts_length_scale',(1/speed).toFixed(2));set('sanotts_pitch',pitch);set('sanotts_bass',bass);set('sanotts_treble',treble);
+}
+(function(){var n=['pitch','bass','treble'];for(var k=0;k<n.length;k++){var e=document.getElementById('sanotts_'+n[k]);if(e)sanottsShow(e);}})();
+function sanottsShape(){
+ var q='',n=['length_scale:ls','pitch:pitch','bass:bass','treble:treble'];
+ for(var k=0;k<n.length;k++){var p=n[k].split(':'),e=document.getElementById('sanotts_'+p[0]);if(e)q+='&'+p[1]+'='+encodeURIComponent(e.value);}
+ return q;
+}
+function sanottsPrepare(cb,onerr){
+ var txt=document.getElementById('sanotts_test_text').value.replace(/\r\n?/g,'\n').replace(/[\u0000-\u0009\u000B-\u001F\u007F]+/g,' ').replace(/^\s+|\s+$/g,'');
+ var t64=btoa(unescape(encodeURIComponent(txt))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+ var vs=document.getElementById('sanotts_voice'),head='&voice='+encodeURIComponent(vs?vs.value:'')+sanottsShape();
+ var PART=1500;
+ if(t64.length<=PART){cb(head+'&t64='+t64);return;}
+ var key='';for(var k=0;k<24;k++)key+='0123456789abcdef'.charAt(Math.floor(Math.random()*16));
+ var i=0,n=Math.ceil(t64.length/PART);
+ (function next(){
+  if(i>=n){cb(head+'&tk='+key);return;}
+  var x=new XMLHttpRequest();
+  x.open('GET','/admin.php?action=sanotts&cmd=test_put&tk='+key+'&i='+i+'&d='+t64.substr(i*PART,PART)+'&_='+Date.now(),true);
+  x.onload=function(){var r=null;try{r=JSON.parse(x.responseText)}catch(e){}
+   if(!r||!r.ok){onerr((r&&r.error)||('HTTP '+x.status));return}
+   i++;next();};
+  x.onerror=function(){onerr('HTTP');};
+  x.send();
+ })();
+}
+// «Разбор»: какие свои правила сработали и как фраза будет прочитана.
+function sanottsExplainTest(){
+ var st=document.getElementById('sanotts_test_status'),box=document.getElementById('sanotts_test_explain');
+ st.style.color='';st.textContent='…';
+ sanottsPrepare(function(params){sanottsExplain(params,box,st);},function(m){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: '+m;});
+}
+// «Скачать»: весь текст одним WAV. Через XHR, а не переходом по ссылке, — чтобы
+// ошибку синтеза показать в строке состояния, а не открыть страницей.
+function sanottsDownload(){
+ var st=document.getElementById('sanotts_test_status');
+ st.style.color='';st.textContent='…';
+ sanottsPrepare(function(params){sanottsDownloadGo(params,st);},function(m){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: '+m;});
+}
+function sanottsDownloadGo(params,st){
+ var x=new XMLHttpRequest();
+ x.open('GET','/admin.php?action=sanotts&cmd=test_download'+params+'&_='+Date.now(),true);
+ x.responseType='blob';
+ x.onload=function(){
+  var type=(x.getResponseHeader('Content-Type')||'');
+  if(x.status!==200||type.indexOf('audio')<0){
+   var rd=new FileReader();
+   rd.onload=function(){var m='';try{m=JSON.parse(rd.result).error||''}catch(e){m='HTTP '+x.status+' '+String(rd.result).replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').substring(0,300)}
+    st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>'+(m?': '+m:'');};
+   rd.readAsText(x.response);return;
+  }
+  var name=(/filename="([^"]+)"/.exec(x.getResponseHeader('Content-Disposition')||'')||[])[1]||'sanotts.wav';
+  var url=URL.createObjectURL(x.response),a=document.createElement('a');
+  a.href=url;a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(url);a.parentNode.removeChild(a);},1000);
+  st.style.color='#28a745';st.textContent=name+' ('+Math.round(x.response.size/1024)+' KB)';
+ };
+ x.onerror=function(){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: HTTP';};
+ x.send();
+}
+var sanottsTestGen=0;
+function sanottsTest(){
+ var st=document.getElementById('sanotts_test_status');
+ var au=document.getElementById('sanotts_test_audio');
+ var gen=++sanottsTestGen, queue=[], playing=false, t0=Date.now(), first=null, server=null, total=0, got=0, from=0, finished=false;
+ var job='';for(var k=0;k<24;k++)job+='0123456789abcdef'.charAt(Math.floor(Math.random()*16));
+ st.style.color='';st.textContent='…';
+ au.pause();
+ var base='/admin.php?action=sanotts&job='+job;
+ function fail(msg){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>'+(msg?': '+msg:'');}
+ function status(){
+  st.style.color='#28a745';
+  // Два времени: когда звук начался здесь и сколько сервер синтезировал первое
+  // предложение. Если первое намного больше — задержка в доставке, а не в синтезе.
+  st.textContent=first+' s'+(total>1?' — <#LANG_SANOTTS_TEST_FIRST#>; '+got+'/'+total:'')+
+   (server!==null?' (<#LANG_SANOTTS_TEST_SERVER#> '+server.toFixed(2)+' s)':'');
+ }
+ function play(){
+  if(gen!==sanottsTestGen||playing||!queue.length)return;
+  playing=true;au.src=queue.shift();au.style.display='';
+  var p=au.play();if(p&&p.catch)p.catch(function(){playing=false;});
+ }
+ au.onended=function(){if(gen!==sanottsTestGen)return;playing=false;play();};
+ function get(url,cb){
+  var x=new XMLHttpRequest();
+  x.open('GET',url+'&_='+Date.now(),true);
+  x.onload=function(){
+   if(gen!==sanottsTestGen)return;
+   try{var r=JSON.parse(x.responseText)}catch(e){fail('HTTP '+x.status+' '+x.responseText.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').substring(0,300));finished=true;return}
+   cb(r);
+  };
+  x.onerror=function(){if(gen===sanottsTestGen){fail('HTTP');finished=true;}};
+  x.send();
+ }
+ function poll(){
+  if(gen!==sanottsTestGen||finished)return;
+  get(base+'&cmd=test_poll&from='+from,function(r){
+   if(r.n)total=r.n;
+   for(var k=0;k<(r.items||[]).length;k++){
+    var it=r.items[k];from=it.i+1;got++;
+    if(it.skip||!it.audio)continue;
+    if(first===null){first=((Date.now()-t0)/1000).toFixed(2);if(it.server!==undefined)server=it.server;}
+    queue.push(it.audio);play();
+   }
+   if(first!==null)status();
+   if(r.done){finished=true;if(first===null)fail(r.error);return}
+   if(r.error&&!r.items){fail(r.error);finished=true;return}
+   poll();
+  });
+ }
+ sanottsPrepare(function(params){
+  if(gen!==sanottsTestGen)return;
+  get(base+'&cmd=test_say'+params,function(r){
+   if(r.error&&first===null&&!r.n){fail(r.error);}
+  });
+  poll();
+ },function(m){if(gen===sanottsTestGen)fail(m);});
+}
+</script>

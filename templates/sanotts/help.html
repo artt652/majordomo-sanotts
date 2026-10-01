@@ -1,0 +1,193 @@
+<style>
+/* Длинные пути и команды переносятся, а не вылезают за панель (телефон, узкая админка). */
+.st-help p, .st-help li, .st-help td { overflow-wrap: anywhere; }
+.st-help code { white-space: normal; overflow-wrap: anywhere; }
+.st-help pre { white-space: pre-wrap; word-break: break-all; background: rgba(127,127,127,.12); color: inherit; border: 0; padding: 10px; border-radius: 3px; font-size: 12px; }
+.st-help h5 { font-weight: bold; margin: 16px 0 6px; }
+.st-help .panel-body > :first-child { margin-top: 0; }
+.st-help .table { width: 100%; margin-bottom: 10px; }
+.st-help .table td, .st-help .table th { padding: 4px 8px 4px 0; }
+</style>
+<div class="st-help">
+
+<h4>Описание</h4>
+<div class="panel-group" id="st_help_accordion">
+
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_common">Общее</a>
+        </div>
+        <div class="panel-body collapse in" id="st_help_common">
+            <p><strong>sanoTTS</strong> — синтез речи для MajorDoMo на движке <a href="https://github.com/Ampixa/sanoTTS" target="_blank">sanoTTS</a>: крошечные нейросетевые голоса (1–7 МБ), всё считается локально. Движок — утилита <code>sanotts_cli</code> (~0,5 МБ) со встроенным espeak-ng: тот же C-код, которым голоса звучат в браузерной версии sanoTTS. Без Python, фоновых служб и облака. Работает в Linux (x86_64, aarch64, armv7), на Android в Termux и KSWEB, в Windows (XAMPP).</p>
+            <p>Модуль озвучивает <code>SAY</code>, <code>SAYTO</code> и <code>SAYREPLY</code>: звук уходит во вкладку браузера через WebSocket или играет из динамика сервера через модуль «Терминалы».</p>
+            <h5>Индикаторы в заголовке</h5>
+            <ul>
+                <li><strong>Голос готов / не установлен</strong> — есть ли выбранный голос.</li>
+                <li><strong>WebSocket</strong> — работает ли WebSocket-сервер ядра, через который звук идёт в браузер.</li>
+                <li><strong>Установлено / Установка / Не установлено / Ошибка установки</strong> — состояние движка; «журнал» открывает журнал установки.</li>
+            </ul>
+            <p><strong>Важно:</strong> если установлен ещё один модуль синтеза речи (например, <code>piper_tts</code>), оба подписаны на <code>SAY</code>, и фраза прозвучит дважды. Оставьте активным один.</p>
+        </div>
+    </div>
+
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_voice">Голоса</a>
+        </div>
+        <div class="panel-body collapse" id="st_help_voice">
+            <p>27 официальных голосов sanoTTS на 17 языках и 2 дополнительных русских — Ирина и Денис, обученные по инструкции sanoTTS. Ставятся на вкладке «Голоса»: скачиваются голос (1–7 МБ) и словарь espeak его языка, каждый файл сверяется по sha256.</p>
+            <table class="table table-condensed">
+                <tr><th>Язык</th><th>Голоса</th></tr>
+                <tr><td>Русский</td><td><code>irina</code> — Ирина (женский, по умолчанию) и <code>denis</code> — Денис (мужской), 1,84 млн параметров; <code>russian</code> (1,57 млн), <code>russian-tiny</code> (0,51 млн, в 3–4 раза быстрее)</td></tr>
+                <tr><td>Немецкий, испанский, итальянский, португальский (Бразилия), чешский, румынский, турецкий</td><td><code>&lt;язык&gt;</code> и <code>&lt;язык&gt;-tiny</code></td></tr>
+                <tr><td>Французский, польский, арабский</td><td><code>french</code>, <code>polish</code>, <code>arabic</code></td></tr>
+                <tr><td>Английский (США)</td><td><code>amy</code>, <code>kristin</code>, <code>hfc</code></td></tr>
+                <tr><td>Вьетнамский, индонезийский, хинди, непальский</td><td><code>vietnamese</code>, <code>indonesian</code>, <code>hindi</code>, <code>nepali</code></td></tr>
+                <tr><td>Китайский</td><td><code>chinese</code></td></tr>
+            </table>
+            <p><strong>Свой голос</strong> — каталог <code>cms/sanotts/voices/&lt;имя&gt;/</code> в формате браузерных голосов sanoTTS: <code>meta.json</code> (нужны <code>espeak_voice</code>, <code>g2p_voice_slot</code>, <code>sample_rate</code>, <code>length_scale</code>), <code>front_f16.bin</code> или <code>front_f32.bin</code>, <code>dec_f16.bin</code> или <code>dec_f32.bin</code>. Словарь его языка поставит «Обновить движок».</p>
+            <p><strong>Как обучить свой голос.</strong> Голоса sanoTTS — маленькие «ученики», дистиллированные из голоса Piper (учителя): тембр и манера речи — его. Инструкция — <a href="https://github.com/Ampixa/sanoTTS/blob/master/docs/distillation-recipe.md" target="_blank">distillation-recipe.md</a> в репозитории sanoTTS (на английском):</p>
+            <ol>
+                <li>Выберите голос-учитель Piper (<code>.onnx</code> + <code>.onnx.json</code>) нужного языка и подготовьте тексты: несколько тысяч строк для акустической модели, несколько сотен — для декодера.</li>
+                <li>Отрисуйте учителем «пакет» — фонемы, длительности, скрытые представления и звук для каждой фразы.</li>
+                <li>Обучите три модели-ученика: длительностей, акустическую и декодер; затем совместное дообучение и, по желанию, финальная «полировка».</li>
+                <li>Сохраните голос в браузерном формате sanoTTS (как голоса в <code>web/voices/</code>): <code>meta.json</code> + <code>front_f16.bin</code> + <code>dec_f16.bin</code>, — и положите каталогом в <code>cms/sanotts/voices/&lt;имя&gt;/</code>. Голос появится на вкладке «Голоса».</li>
+            </ol>
+            <p>Нужны Python с PyTorch и видеокарта (подойдёт Google Colab); обучение занимает часы. Так обучены дополнительные голоса Ирина и Денис. Для языка, которого в sanoTTS ещё нет, — <a href="https://github.com/Ampixa/sanoTTS/blob/master/docs/roota-language-porting-recipe.md" target="_blank">roota-language-porting-recipe.md</a>.</p>
+            <p><strong>Арабский.</strong> Короткие гласные (харакаты) в письме обычно не пишут, а голос учился на тексте с ними. Их расставляет отдельная утилита <code>sanotts_tashkeel</code> — модель libtashkeel (MIT), та же, что у Piper. Веса (2,4 МБ) скачиваются с арабским голосом; уже расставленные огласовки сохраняются. Отключается галочкой в настройках.</p>
+        </div>
+    </div>
+
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_ru">Русский текст: ударения, ё, числа</a>
+        </div>
+        <div class="panel-body collapse" id="st_help_ru">
+            <p>Для русских голосов текст готовят русские правила модуля (галочка «Русские правила: ударения, ё, числа», включена по умолчанию):</p>
+            <ul>
+                <li><strong>Числа и даты с падежами:</strong> «в 1989 году», «2 минуты», «29.09.2026», «07:30», «с 22:07 до 1:30» → «с двадцати двух ноль семи до часа тридцати», «22,5°», «2,5 часа» → «два с половиной часа».</li>
+                <li><strong>Единицы и валюты:</strong> 40%, 125 кВт, 21 кв. м, $868 млн, 1,4 тыс. грн, 5 GBP; км/ч, м/с, мм рт. ст.; часовые пояса (UTC+3 → «по москве»).</li>
+                <li><strong>Сокращения:</strong> т.е., и т.д., стр. 5, п. 1.4, § 3; римские числа — «в XVIII веке», «Пётр I».</li>
+                <li><strong>Латиница:</strong> Wi-Fi → «вай-фай», HTTPS, config.yaml, Home Assistant.</li>
+                <li><strong>Ё:</strong> «еще» → «ещё», «дешевый» → «дешёвый».</li>
+                <li><strong>Ударение по смыслу:</strong> замо́к / за́мок, в саду́ / к са́ду, сто́ит / стои́т, мука́ / му́ка и другие омографы.</li>
+                <li><strong>Произношение:</strong> паузы на запятых, мягкий знак (соль, день), твёрдое «л» (жёлтый).</li>
+            </ul>
+            <h5>Своё ударение</h5>
+            <p>Если ударение выбрано не то, укажите его прямо в тексте фразы — в сценарии, в SAY или в окне «Проверка»:</p>
+            <ul>
+                <li><code>за́мок</code> — знак ударения после гласной;</li>
+                <li><code>зам+ок</code> — плюс перед ударной гласной;</li>
+                <li><code>замОк</code> — ударная гласная заглавной буквой.</li>
+            </ul>
+            <p>Пример в сценарии: <code>say('Зам+ок на двери открыт');</code>. Отметка действует только там, где стоит: «замок» без отметки читается как обычно. Первая фраза с новой отметкой готовится примерно на секунду дольше — модуль записывает её в словарь движка (<code>cms/sanotts/share/ru_dictsource/ru_extra.user</code>) и пересобирает его; дальше та же отметка звучит без задержки. Список таких ударений — на вкладке «Произношение», там же их можно удалить. Чтобы слово всегда читалось с нужным ударением, без отметки в каждой фразе, — сделайте правило: <code>портфел*</code> → <code>п+ортфел*</code>.</p>
+        </div>
+    </div>
+
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_rules">Свои правила произношения</a>
+        </div>
+        <div class="panel-body collapse" id="st_help_rules">
+            <p>На вкладке «Произношение» — свои правила чтения: сокращения, названия устройств и комнат, бренды, слова с неверным ударением. Правило — пара «что → как читать»; правила применяются по порядку сверху вниз, до встроенных русских правил, поэтому ими можно поменять и встроенное чтение. Пока — для русских голосов.</p>
+            <ul>
+                <li><strong>Слово или фраза:</strong> совпадает целое слово — <code>MQTT</code> → <code>эм ку ти ти</code>, <code>умный дом</code> → <code>у+мный д+ом</code>. Звёздочка в конце — все формы слова: <code>портфел*</code> → <code>п+ортфел*</code> (портфель, портфеля, портфелями…); <code>*</code> в замене — окончание найденного слова.</li>
+                <li><strong>Любой текст:</strong> и внутри слов, и знаки — <code>№</code> → <code>номер </code>. Пробелы по краям сохраняются.</li>
+                <li><strong>Регулярное выражение:</strong> PCRE без ограничителей, в замене <code>$1</code>, <code>$2</code> — <code>\bESP(\d+)</code> → <code>и эс пи $1</code>.</li>
+            </ul>
+            <p>Ударение в замене — как в тексте: <code>д+ома</code>, <code>домА</code> или <code>дома́</code>. Регистр без галочки «Учитывать регистр» не важен; если найденное слово начинается с заглавной, замена тоже.</p>
+            <p><strong>Проверка:</strong> ▶ у правила озвучивает пример, кнопка «Разбор» (на вкладке и в окне «Проверка» настроек) показывает, какие правила сработали, текст после них и как фраза будет прочитана — с ударениями. После изменения правил старые записи кэша не используются.</p>
+            <p><strong>Ударения, добавленные в словарь</strong> — то, что модуль сам дописал в словарь из отметок ударения в текстах; ненужные можно удалить.</p>
+            <p><strong>Импорт и экспорт:</strong> правила выгружаются текстовым файлом (по правилу на строку, поля через табуляцию) и загружаются обратно — с добавлением к имеющимся или с заменой. Подойдёт и простой список <code>что = как читать</code>, в том числе из Блокнота в Windows-1251. Правила хранятся в таблице <code>sanotts_rules</code> базы MajorDoMo и попадают в её резервные копии; при удалении модуля таблица удаляется — сделайте экспорт.</p>
+        </div>
+    </div>
+
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_speed">Темп, высота, тембр, паузы, громкость</a>
+        </div>
+        <div class="panel-body collapse" id="st_help_speed">
+            <p><strong>Пресеты</strong> (Обычный, Мягкий, Яркий, Низкий, Высокий, Диктор) выставляют темп, высоту и тембр. Послушать — «Проверить», сохранить — UPDATE.</p>
+            <p><strong>Темп</strong> — множитель к родному темпу голоса: <code>1.00</code> — как голос настроен, больше — медленнее, меньше — быстрее.</p>
+            <p><strong>Высота голоса</strong> — от −8 до +8 полутонов; темп при этом не меняется: модель говорит медленнее или быстрее, и звук пересэмплируется обратно.</p>
+            <p><strong>Тембр</strong> — низкие (полка 250 Гц) и высокие (полка 3500 Гц), ±12 дБ.</p>
+            <p><strong>Пауза между предложениями</strong> — тишина, которой склеиваются предложения (каждое синтезируется отдельно).</p>
+            <p><strong>Тишина в начале</strong> — защищает начало фразы: часть плееров «съедает» первые сотни миллисекунд. <code>0</code> — выключено.</p>
+            <p><strong>Громкость.</strong> Выравнивание делает сам движок, ffmpeg не нужен: громкость меряется по речи (ITU-R BS.1770, паузы не учитываются), фраза усиливается до цели, пики держит мягкий лимитер. Поэтому «Да.» и длинное сообщение звучат одинаково. По умолчанию −16 LUFS (громко и разборчиво); −20…−23 — тише, например для ночных оповещений. Без галочки — только пик на −2 dBFS.</p>
+            <p>Высота, тембр и громкость обрабатываются в движке — одинаково в браузере, на терминалах и в скачанном файле.</p>
+        </div>
+    </div>
+
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_cache">Воспроизведение, проверка и кэш</a>
+        </div>
+        <div class="panel-body collapse" id="st_help_cache">
+            <p><strong>По предложениям</strong> (включено по умолчанию): сообщение режется на предложения, и каждое уходит в браузер, как только готово. Первое звучит через 0,2–0,3 с, пока синтезируются следующие, и задержка не растёт с длиной сообщения. Всё сообщение синтезирует один запуск движка, плеер ставит предложения встык (Web Audio) — пауз на загрузку нет.</p>
+            <p><strong>Терминалы</strong> (звук из динамика сервера): в настройках терминала выберите тип TTS <code>sanotts</code>. Терминал получает сообщение одним файлом. Нужен проигрыватель: в Linux — <code>paplay</code>, <code>aplay</code> или <code>ffplay</code>, в Termux — <code>play-audio</code>, в Windows звук играет встроенный в PowerShell плеер.</p>
+            <p><strong>«Проверить» и «Скачать»</strong> берут голос, темп, высоту и тембр прямо со страницы — сохранять перед прослушиванием не нужно. Длина текста не ограничена. Один файл (SAYTO, «Скачать») — до 10 минут речи; по предложениям ограничения нет.</p>
+            <p><strong>Кэш:</strong> каждая фраза сохраняется в <code>cms/cached/voice/sanotts_*.wav</code>; ключ зависит от текста, голоса и всех параметров. Галочка «Удалять редкоиспользуемые фразы» (включена по умолчанию) удаляет файлы, к которым не обращались 10 дней.</p>
+            <p>Звук уходит в браузер событием <code>SANOTTS</code> через WebSocket ядра; плеер <code>sanotts.js</code> подключается ко всем страницам сам (через общий <code>modules/prepend.php</code>). Для SPA-панелей добавьте перед <code>&lt;/body&gt;</code>: <code>&lt;script src="/templates/sanotts/js/sanotts.js"&gt;&lt;/script&gt;</code></p>
+        </div>
+    </div>
+</div>
+
+<h4>Установка движка</h4>
+<div class="panel-group" id="st_help_install_accordion">
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            <a data-toggle="collapse" data-parent="#st_help_install_accordion" href="#st_help_auto">Что делает кнопка «Установить движок»</a>
+        </div>
+        <div class="panel-body collapse in" id="st_help_auto">
+            <ol>
+                <li>Скачивает готовый <code>sanotts_cli</code> под вашу систему из репозитория движка <a href="https://github.com/artt652/sanotts-engine" target="_blank">sanotts-engine</a> (~0,5 МБ, espeak-ng встроен): Linux (x86_64, aarch64, armv7, x86), Android (aarch64, arm, x86_64) или Windows (64- и 32-битная).</li>
+                <li>Скачивает список словоформ espeak-ng 1.52.0 (23 МБ) и собирает полный русский словарь (811 тыс. словоформ с ударениями), а также словарь ё eyo-kernel (0,9 МБ).</li>
+                <li>Скачивает выбранный голос и словарь его языка, делает самопроверку. Остальные голоса — на вкладке «Голоса».</li>
+            </ol>
+            <p>Установщик написан на PHP: не нужны ни bash, ни компилятор, ни <code>git</code>, ни root. Качает сам PHP (php-curl или https-потоки, запасной вариант — curl/wget), каждый файл сверяется по sha256; если GitHub недоступен, те же файлы берутся с зеркала jsDelivr. Движок ставится в <code>cms/sanotts</code> внутри MajorDoMo. В Linux и Termux установка идёт фоновым процессом PHP, в Windows — прямо в запросе веб-сервера; браузер следит за журналом.</p>
+            <p><strong>Без доступа к GitHub:</strong> скачайте <code>sanotts_cli</code> своей платформы из <a href="https://github.com/artt652/sanotts-engine" target="_blank">sanotts-engine</a> (каталог <code>bin/&lt;платформа&gt;/</code>, платформа написана в журнале установки) и положите в <code>cms/sanotts/engine/&lt;платформа&gt;/</code> — установщик проверит sha256 и возьмёт файл. Голос и словарь так же качаются с GitHub.</p>
+            <p><strong>KSWEB (Android):</strong> сайт лежит на общей памяти (<code>/storage/emulated/0</code>), а с неё Android программы не запускает. Установщик сам кладёт <code>sanotts_cli</code> во внутренний каталог KSWEB (<code>/data/data/ru.kslabs.ksweb/files/sanotts/bin</code>) и запускает через системный загрузчик <code>/system/bin/linker64</code>. Строки «rc=127» и «запуск через /system/bin/linker64» в журнале — это нормально.</p>
+            <p>Из консоли:</p>
+<pre># Linux (от пользователя веб-сервера):
+sudo -u www-data php /var/www/html/modules/sanotts/bin/install.php
+# Termux:
+php ~/htdocs/modules/sanotts/bin/install.php
+# Windows (XAMPP):
+C:\xampp\php\php.exe C:\xampp\htdocs\modules\sanotts\bin\install.php
+# другой голос: --voice=german</pre>
+        </div>
+    </div>
+    <div class="panel panel-info">
+        <div class="panel-heading">
+            <a data-toggle="collapse" data-parent="#st_help_install_accordion" href="#st_help_manual">Проверка движка вручную</a>
+        </div>
+        <div class="panel-body collapse" id="st_help_manual">
+<pre>cd /var/www/html/cms/sanotts
+echo "Привет, мир!" | bin/sanotts_cli -d share/espeak-ng-data -v voices/irina -o t.wav
+aplay t.wav
+
+rem Windows:
+cd C:\xampp\htdocs\cms\sanotts
+bin\sanotts_cli.exe -d share\espeak-ng-data -v voices\irina -o t.wav -t "Привет, мир!"
+
+# -d данные espeak   -v голос   -o файл WAV   -t текст (иначе — из stdin)
+# -s темп   -p пауза между предложениями, с   -l тишина в начале, с
+# -L громкость LUFS | off   -P высота, полутоны   -B низкие, дБ   -T высокие, дБ</pre>
+        </div>
+    </div>
+    <div class="panel panel-warning">
+        <div class="panel-heading">
+            <a data-toggle="collapse" data-parent="#st_help_install_accordion" href="#st_help_trouble">Не звучит</a>
+        </div>
+        <div class="panel-body collapse" id="st_help_trouble">
+            <ul>
+                <li>Нажмите «Проверить» на вкладке настроек. Если звук есть там — движок в порядке, ищите проблему в доставке: WebSocket, <code>prepend.php</code>, вкладка в фоне (плеер слушает только активную вкладку).</li>
+                <li>Журнал установки — ссылка «журнал» в заголовке (есть кнопка «Скопировать»); журнал модуля — <code>cms/debmes/*_sanotts.txt</code>. Вкладка «Голоса» показывает, что модуль видит на диске.</li>
+                <li>Если <code>php_value</code> в <code>.htaccess</code> не работает (PHP-FPM, <code>AllowOverride None</code>), пропишите <code>auto_prepend_file = /var/www/html/modules/prepend.php</code> в <code>php.ini</code> пула FPM.</li>
+                <li>Терминал молчит — проверьте, что на сервере есть проигрыватель (см. «Воспроизведение, проверка и кэш»).</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+</div>

@@ -1,0 +1,79 @@
+<style>
+  #model_table .label-status { display:inline-block; min-width:120px; text-align:center; }
+  /* Одна ширина у «Установить» и «Удалить» на любом экране. */
+  #model_table .btn-action { width:92px; padding-left:0; padding-right:0; text-align:center; }
+  #model_table tr.voice-main td { border-top:1px solid #ddd; vertical-align:middle; }
+  #model_table tr.voice-desc td { border-top:0; padding-top:0; font-size:12px; line-height:1.45; color:#555; }
+  /* Телефон: статус и так виден по кнопке (Удалить / Установить) — колонку прячем. */
+  @media (max-width: 767px) {
+    #model_table .col-status { display:none; }
+    #model_table td, #model_table th { padding-left:4px; padding-right:4px; }
+  }
+</style>
+<fieldset>
+  <legend><#LANG_SANOTTS_MODEL_MANAGEMENT#></legend>
+[#if NO_VOICES="1"#]
+  <div class="alert alert-warning"><#LANG_SANOTTS_NO_VOICES#></div>
+[#endif#]
+  <table class="table" id="model_table">
+    <thead>
+      <tr>
+        <th><#LANG_SANOTTS_VOICE#></th>
+        <th><#LANG_SANOTTS_LANGUAGE#></th>
+        <th><#LANG_SANOTTS_SIZE#></th>
+        <th class="col-status"><#LANG_SANOTTS_STATUS#></th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+[#begin AVAILABLE_MODELS#]
+      <tr class="voice-main">
+       <td><b>[#VOICE#]</b></td>
+       <td>[#LANGUAGE#]</td>
+       <td style="white-space:nowrap">[#SIZE#]</td>
+       <td class="col-status">[#if CUSTOM="1"#]<span class="label label-info label-status"><#LANG_SANOTTS_CUSTOM#></span> [#else#][#if INSTALLED="1"#]<span class="label label-success label-status"><#LANG_SANOTTS_INSTALLED_TRUE#></span>[#else#]<span class="label label-default label-status"><#LANG_SANOTTS_INSTALLED_FALSE#></span>[#endif#][#endif#]</td>
+       <td>
+[#if INSTALLED="1"#]
+        <a href="?action=sanotts&cmd=delete_model&tab=models&voice=[#VOICE#]" class="btn btn-danger btn-sm btn-action" onclick="return confirm('<#LANG_SANOTTS_CONFIRM_DELETE#>'.replace('%s','[#VOICE#]'))"><#LANG_SANOTTS_DELETE#></a>
+[#else#]
+        <a href="?action=sanotts&cmd=install_model&tab=models&voice=[#VOICE#]" class="btn btn-success btn-sm btn-action" onclick="return confirm('<#LANG_SANOTTS_CONFIRM_INSTALL#>'.replace('%s','[#VOICE#]'))"><#LANG_SANOTTS_INSTALL#></a>
+[#endif#]
+       </td>
+      </tr>
+      <tr class="voice-desc">
+       <td colspan="5">[#DESC#][#if QUALITY=""#][#else#]<br>[#QUALITY#][#endif#][#if NOTE=""#][#else#]<br><span class="text-muted">[#NOTE#]</span>[#endif#]</td>
+      </tr>
+[#end AVAILABLE_MODELS#]
+    </tbody>
+  </table>
+  <div class="help-block" style="font-size:12px;margin-bottom:10px"><#LANG_SANOTTS_QUALITY_HINT#></div>
+  <p class="help-block"><#LANG_SANOTTS_CUSTOM_HINT#> <code>[#VOICES_DIR#]/&lt;<#LANG_SANOTTS_NAME#>&gt;/</code></p>
+</fieldset>
+
+<fieldset>
+  <legend><#LANG_SANOTTS_DIAG#></legend>
+  <table class="table table-condensed" style="font-size:12px">
+   <tbody id="sanotts_diag"><tr><td>…</td></tr></tbody>
+  </table>
+</fieldset>
+<script>
+// Диагностика — отдельным запросом: в ней пробный синтез, и страница не ждёт его.
+(function(){
+ var tb=document.getElementById('sanotts_diag');
+ var x=new XMLHttpRequest();
+ x.open('GET','/admin.php?action=sanotts&cmd=diag&_='+Date.now(),true);
+ x.onload=function(){
+  try{var r=JSON.parse(x.responseText)}catch(e){tb.innerHTML='<tr><td>HTTP '+x.status+'</td></tr>';return}
+  var h='';
+  for(var i=0;i<r.rows.length;i++){
+   var d=r.rows[i];
+   // NAME и VALUE приходят уже экранированными для HTML.
+   h+='<tr><td style="width:30%;white-space:pre"><code>'+d.NAME+'</code></td><td>'+
+      (d.OK==='1'?'<span style="color:#28a745">&#10004;</span>':'<span style="color:#dc3545">&#10008;</span>')+' '+d.VALUE+'</td></tr>';
+  }
+  tb.innerHTML=h;
+ };
+ x.onerror=function(){tb.innerHTML='<tr><td>HTTP error</td></tr>';};
+ x.send();
+})();
+</script>

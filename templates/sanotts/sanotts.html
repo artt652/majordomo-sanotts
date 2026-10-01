@@ -1,0 +1,205 @@
+<script>window.SANOTTS_WS_PORT=[#WS_PORT#];</script>
+<h3>
+    <img src="/img/modules/sanotts.png" style="width:32px;height:32px;vertical-align:middle;margin-right:8px;">
+    <#LANG_SANOTTS_TITLE#>
+    <span style="margin-left:12px;font-size:13px;font-weight:normal;">
+        <span title="<#LANG_SANOTTS_VOICE_STATUS#>">
+            <span id="voice_status_dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:[#if VOICE_OK="1"#]#28a745[#else#]#dc3545[#endif#];vertical-align:middle;margin-right:3px"></span>
+            <span id="voice_status_text" style="vertical-align:middle;">[#if VOICE_OK="1"#]<#LANG_SANOTTS_VOICE_READY#>[#else#]<#LANG_SANOTTS_VOICE_MISSING#>[#endif#]</span>
+        </span>
+        <span style="margin-left:8px" title="<#LANG_SANOTTS_WS_STATUS#>">
+            <span id="ws_status_dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:[#if WS_ALIVE="1"#]#28a745[#else#]#dc3545[#endif#];vertical-align:middle;margin-right:3px"></span>
+            <span id="ws_status_text" style="vertical-align:middle;">[#if WS_ALIVE="1"#]<#LANG_SANOTTS_WS_CONNECTED#>[#else#]<#LANG_SANOTTS_WS_DISCONNECTED#>[#endif#]</span>
+        </span>
+        <span style="margin-left:8px">
+            <span id="install_status_dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:[#if INSTALL_STATUS="1"#]#28a745[#else#][#if INSTALL_STATUS="2"#]#ffc107[#else#]#dc3545[#endif#][#endif#];vertical-align:middle;margin-right:3px"></span>
+            <span id="install_status_text" style="vertical-align:middle;">[#if INSTALL_STATUS="1"#]<#LANG_SANOTTS_INSTALLED_TRUE#>[#else#][#if INSTALL_STATUS="2"#]<#LANG_SANOTTS_INSTALLED_PENDING#>[#else#][#if INSTALL_STATUS="3"#]<#LANG_SANOTTS_INSTALLED_FAILED#>[#else#]<#LANG_SANOTTS_INSTALLED_FALSE#>[#endif#][#endif#][#endif#]</span>
+            <button id="install_engine_btn" class="btn btn-success btn-sm" style="margin-left:6px;vertical-align:middle;[#if INSTALL_STATUS="2"#]display:none[#endif#]" onclick="sanottsInstall();return false">[#if INSTALL_STATUS="1"#]<#LANG_SANOTTS_UPDATE_ENGINE#>[#else#]<#LANG_SANOTTS_INSTALL_ENGINE#>[#endif#]</button>
+            <a href="#" onclick="sanottsToggleLog();return false" style="margin-left:6px;font-size:12px"><#LANG_SANOTTS_INSTALL_LOG#></a>
+        </span>
+    </span>
+    <span style="float:right;margin-top:4px;">
+        <button class="btn btn-primary btn-sm" data-toggle="modal" data-target="#sanotts_about"><#LANG_SANOTTS_ABOUT#>&nbsp;&nbsp;<span class="glyphicon glyphicon-info-sign icon-white"></span></button>
+    </span>
+</h3>
+<div id="sanotts_log_box" style="display:none">
+    <div style="margin-bottom:4px">
+        <button type="button" class="btn btn-default btn-xs" onclick="sanottsCopyLog();return false"><#LANG_SANOTTS_COPY_LOG#></button>
+        <span id="sanotts_copy_status" style="font-size:12px;margin-left:6px"></span>
+    </div>
+    <pre id="sanotts_install_log" style="max-height:260px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all"></pre>
+</div>
+<div id="sanotts_manual" class="alert alert-danger" style="[#if INSTALL_STATUS="3"#][#else#]display:none[#endif#]"><#LANG_SANOTTS_MANUAL_HINT#><br><code style="user-select:all">[#MANUAL_INSTALL#]</code></div>
+<hr>
+
+<ul class="nav nav-tabs">
+    <li [#if TAB_SETTINGS="1"#]class="active"[#endif#]><a href="?action=sanotts&tab=settings"><#LANG_SANOTTS_SETTINGS#></a></li>
+    <li [#if TAB_MODELS="1"#]class="active"[#endif#]><a href="?action=sanotts&tab=models"><#LANG_SANOTTS_MODEL_MANAGEMENT#></a></li>
+    <li [#if TAB_RULES="1"#]class="active"[#endif#]><a href="?action=sanotts&tab=rules"><#LANG_SANOTTS_RULES_TAB#></a></li>
+    <li [#if TAB_HELP="1"#]class="active"[#endif#]><a href="?action=sanotts&tab=help"><#LANG_SANOTTS_HELP#></a></li>
+</ul>
+<br>
+
+[#if TAB_SETTINGS="1"#]
+    [#inc settings.html#]
+[#endif#]
+[#if TAB_MODELS="1"#]
+    [#inc models.html#]
+[#endif#]
+[#if TAB_RULES="1"#]
+    [#inc rules.html#]
+[#endif#]
+[#if TAB_HELP="1"#]
+    [#inc help.html#]
+[#endif#]
+[#inc about.html#]
+
+<style>
+.sanotts-explain{margin-top:8px;font-size:13px}
+.sanotts-explain .st-ex-row{margin-bottom:6px}
+.sanotts-explain .st-ex-row:last-child{margin-bottom:0}
+.sanotts-explain .st-ex-h{font-weight:bold;margin-right:6px}
+.sanotts-explain .st-ex-chunk{display:block;padding:3px 8px;margin:3px 0;background:#fff;border-left:3px solid #5bc0de;word-break:break-word}
+.sanotts-explain code{white-space:normal}
+</style>
+<script>
+// Общие помощники вкладок: base64url для текста в адресе, ▶ и «Разбор».
+function sanottsB64(t){return btoa(unescape(encodeURIComponent(String(t)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+var sanottsPlayAudio=null;
+function sanottsRulePlay(text,st){
+ if(!/\S/.test(text||''))return;
+ if(st){st.style.color='';st.textContent='…';}
+ var x=new XMLHttpRequest();
+ x.open('GET','/admin.php?action=sanotts&cmd=test_say&t64='+sanottsB64(text)+'&_='+Date.now(),true);
+ x.onload=function(){var r=null;try{r=JSON.parse(x.responseText)}catch(e){}
+  if(!r||!r.ok){if(st){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>'+(r&&r.error?': '+r.error:'');}return}
+  if(st)st.textContent='';
+  if(sanottsPlayAudio)sanottsPlayAudio.pause();
+  sanottsPlayAudio=new Audio(r.audio);sanottsPlayAudio.play();};
+ x.onerror=function(){if(st){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: HTTP';}};
+ x.send();
+}
+// «Разбор»: params — то же, что у «Проверить» (&t64=… или &tk=…, &voice=…).
+function sanottsExplain(params,box,st){
+ if(st){st.style.color='';st.textContent='…';}
+ var x=new XMLHttpRequest();
+ x.open('GET','/admin.php?action=sanotts&cmd=test_explain'+params+'&_='+Date.now(),true);
+ x.onload=function(){var r=null;try{r=JSON.parse(x.responseText)}catch(e){}
+  if(!r||r.original===undefined){if(st){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>'+(r&&r.error?': '+r.error:'');}return}
+  if(st)st.textContent='';
+  sanottsExplainShow(r,box);};
+ x.onerror=function(){if(st){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: HTTP';}};
+ x.send();
+}
+function sanottsExplainShow(r,box){
+ var E=function(t,c,s){var e=document.createElement(t);if(c)e.className=c;if(s!==undefined)e.textContent=s;return e;};
+ box.innerHTML='';
+ var w=E('div','well well-sm sanotts-explain');
+ var row=E('div','st-ex-row');row.appendChild(E('span','st-ex-h','<#LANG_SANOTTS_EXPLAIN_RULES#>:'));
+ if(!r.rules.length)row.appendChild(E('span','','<#LANG_SANOTTS_EXPLAIN_NONE#>'));
+ r.rules.forEach(function(h,i){
+  if(i)row.appendChild(document.createTextNode('; '));
+  row.appendChild(E('code','',h.pattern));row.appendChild(document.createTextNode(' → '));
+  row.appendChild(E('code','',h.replacement===''?'∅':h.replacement));
+  if(h.count>1)row.appendChild(document.createTextNode(' ×'+h.count));
+ });
+ w.appendChild(row);
+ if(r.user!==r.original){row=E('div','st-ex-row');row.appendChild(E('span','st-ex-h','<#LANG_SANOTTS_EXPLAIN_AFTER#>:'));row.appendChild(E('span','',r.user));w.appendChild(row);}
+ row=E('div','st-ex-row');row.appendChild(E('div','st-ex-h',r.ru?'<#LANG_SANOTTS_EXPLAIN_READ#>:':'<#LANG_SANOTTS_EXPLAIN_PLAIN#>:'));
+ var st=[];
+ r.chunks.forEach(function(c){row.appendChild(E('span','st-ex-chunk',c.text));c.stress.forEach(function(s){if(st.indexOf(s)<0)st.push(s);});});
+ w.appendChild(row);
+ if(st.length){row=E('div','st-ex-row');row.appendChild(E('span','st-ex-h','<#LANG_SANOTTS_EXPLAIN_STRESS#>:'));row.appendChild(E('span','',st.join(', ')));w.appendChild(row);}
+ box.appendChild(w);
+}
+function sanottsInstall(){
+ if(!confirm('<#LANG_SANOTTS_CONFIRM_ENGINE#>'))return;
+ var btn=document.getElementById('install_engine_btn');
+ if(btn)btn.style.display='none';
+ sanottsLogUserClosed=false;
+ var x=new XMLHttpRequest();
+ x.open('GET','/admin.php?action=sanotts&cmd=install_engine',true);
+ x.send();
+ setTimeout(sanottsShowLog,1500);
+}
+var sanottsLogTimer=null,sanottsLogUserClosed=false;
+// «журнал»: первое нажатие открывает журнал, повторное — сворачивает. Свёрнутый
+// вручную журнал сам больше не раскрывается (до новой установки).
+function sanottsToggleLog(){
+ var box=document.getElementById('sanotts_log_box');
+ if(box.style.display!=='none'){
+  box.style.display='none';
+  if(sanottsLogTimer){clearInterval(sanottsLogTimer);sanottsLogTimer=null;}
+  sanottsLogUserClosed=true;
+ }else{
+  sanottsLogUserClosed=false;
+  sanottsShowLog();
+ }
+}
+function sanottsShowLog(){
+ var el=document.getElementById('sanotts_install_log');
+ document.getElementById('sanotts_log_box').style.display='';
+ function load(){
+  var x=new XMLHttpRequest();
+  x.open('GET','/admin.php?action=sanotts&cmd=install_log',true);
+  x.onload=function(){if(x.status==200){el.textContent=x.responseText||'—';el.scrollTop=el.scrollHeight;}};
+  x.send();
+ }
+ load();
+ if(!sanottsLogTimer)sanottsLogTimer=setInterval(load,3000);
+}
+// Копирование журнала: navigator.clipboard есть только на https и localhost,
+// а админку MajorDoMo обычно открывают по http из сети — там через выделение.
+function sanottsCopyLog(){
+ var text=document.getElementById('sanotts_install_log').textContent||'';
+ var st=document.getElementById('sanotts_copy_status');
+ function done(ok){st.style.color=ok?'#28a745':'#dc3545';st.textContent=ok?'<#LANG_SANOTTS_COPIED#>':'<#LANG_SANOTTS_COPY_FAILED#>';setTimeout(function(){st.textContent='';},2500);}
+ function fallback(){
+  var ta=document.createElement('textarea');
+  ta.value=text;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.top='-1000px';
+  document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,text.length);
+  var ok=false;try{ok=document.execCommand('copy');}catch(e){}
+  document.body.removeChild(ta);done(ok);
+ }
+ if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text).then(function(){done(true);},fallback);}
+ else fallback();
+}
+function sanottsSetDot(dotId,textId,color,textColor,text){
+ var d=document.getElementById(dotId),t=document.getElementById(textId);
+ if(!d||!t)return;
+ d.style.background=color;t.style.color=textColor;t.textContent=text;
+}
+setInterval(function(){
+ var x=new XMLHttpRequest();
+ x.open('GET','/admin.php?action=sanotts&cmd=check_status',true);
+ x.onload=function(){
+  if(x.status!=200)return;
+  try{var r=JSON.parse(x.responseText)}catch(e){return}
+  if(r.voice=='ok')sanottsSetDot('voice_status_dot','voice_status_text','#28a745','#28a745','<#LANG_SANOTTS_VOICE_READY#>');
+  else sanottsSetDot('voice_status_dot','voice_status_text','#dc3545','#dc3545','<#LANG_SANOTTS_VOICE_MISSING#>');
+  // Синтез и доставка — разные вещи: готовый голос не значит, что звук
+  // дойдёт до вкладки, если WebSocket-сервер ядра не поднят.
+  if(r.ws=='connected')sanottsSetDot('ws_status_dot','ws_status_text','#28a745','#28a745','<#LANG_SANOTTS_WS_CONNECTED#>');
+  else sanottsSetDot('ws_status_dot','ws_status_text','#dc3545','#dc3545','<#LANG_SANOTTS_WS_DISCONNECTED#>');
+  var ib=document.getElementById('install_engine_btn');
+  if(r.install=='installed'){
+   sanottsSetDot('install_status_dot','install_status_text','#28a745','#28a745','<#LANG_SANOTTS_INSTALLED_TRUE#>');
+   if(ib){ib.style.display='';ib.textContent='<#LANG_SANOTTS_UPDATE_ENGINE#>';}
+   var mh=document.getElementById('sanotts_manual');if(mh)mh.style.display='none';
+  }else if(r.install=='failed'){
+   sanottsSetDot('install_status_dot','install_status_text','#dc3545','#dc3545','<#LANG_SANOTTS_INSTALLED_FAILED#>');
+   if(ib){ib.style.display='';ib.textContent='<#LANG_SANOTTS_INSTALL_ENGINE#>';}
+   var mh=document.getElementById('sanotts_manual');if(mh)mh.style.display='';
+   if(!sanottsLogTimer&&!sanottsLogUserClosed)sanottsShowLog();
+  }else if(r.install=='installing'){
+   sanottsSetDot('install_status_dot','install_status_text','#ffc107','#856404','<#LANG_SANOTTS_INSTALLED_PENDING#>');
+   if(ib)ib.style.display='none';
+   if(!sanottsLogTimer&&!sanottsLogUserClosed)sanottsShowLog();
+  }else{
+   sanottsSetDot('install_status_dot','install_status_text','#dc3545','#dc3545','<#LANG_SANOTTS_INSTALLED_FALSE#>');
+   if(ib)ib.style.display='';
+  }
+ };
+ x.send();
+},3000);
+</script>

@@ -1,0 +1,209 @@
+<style>
+#sanotts_rules td,#sanotts_rules th{vertical-align:middle}
+#sanotts_rules td.st-txt{word-break:break-word}
+#sanotts_rules tr.st-off td.st-txt{color:#999;text-decoration:line-through}
+#sanotts_rules tr.st-bad td.st-txt{color:#c9302c}
+#sanotts_rules .st-act{white-space:nowrap;text-align:right}
+#sanotts_rules .st-act .btn{padding:2px 7px}
+#sanotts_rules .st-ord .btn{padding:0 5px;line-height:1.2;display:block}
+#sanotts_rules .st-type{font-size:12px;color:#666;white-space:nowrap}
+#sanotts_rules .st-note{font-size:12px;color:#666}
+#sanotts_rule_form{display:grid;grid-template-columns:1fr 1fr 190px;gap:8px;align-items:center}
+#sanotts_rule_form .st-wide{grid-column:1/-1}
+#sanotts_rule_form .st-btns{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.st-stress span.st-sw{display:inline-block;margin:0 6px 6px 0;padding:2px 4px 2px 8px;border:1px solid #ddd;border-radius:3px;background:#fafafa}
+.st-stress span.st-sw a{margin-left:4px;color:#c9302c;text-decoration:none;font-weight:bold}
+@media (max-width:767px){
+ #sanotts_rules .st-hide-xs{display:none}
+ #sanotts_rule_form{grid-template-columns:1fr}
+}
+</style>
+<fieldset>
+ <legend><#LANG_SANOTTS_RULES_TAB#></legend>
+ <p><#LANG_SANOTTS_RULES_INTRO#></p>
+[#if IMPORT_DONE="1"#]
+ [#if IMPORT_FAILED!=""#]
+ <div class="alert alert-danger"><#LANG_SANOTTS_IMPORT_FAILED#>: [#IMPORT_FAILED#]</div>
+ [#else#]
+ <div class="alert alert-success" id="sanotts_import_result"></div>
+ <script>(function(){var e=document.getElementById('sanotts_import_result');e.textContent='<#LANG_SANOTTS_IMPORT_RESULT#>'.replace('%a','[#IMPORT_ADDED#]').replace('%s','[#IMPORT_SKIPPED#]');})();</script>
+ [#endif#]
+ [#if IMPORT_ERRORS!=""#]
+ <div class="alert alert-warning"><#LANG_SANOTTS_IMPORT_ERRORS#><pre style="margin:6px 0 0;white-space:pre-wrap">[#IMPORT_ERRORS#]</pre></div>
+ [#endif#]
+[#endif#]
+
+ <table class="table table-condensed" id="sanotts_rules">
+  <thead>
+   <tr>
+    <th style="width:28px"></th>
+    <th style="width:40px" title="<#LANG_SANOTTS_RULES_ON#>"><#LANG_SANOTTS_RULES_ON#></th>
+    <th><#LANG_SANOTTS_RULES_WHAT#></th>
+    <th><#LANG_SANOTTS_RULES_HOW#></th>
+    <th class="st-hide-xs"><#LANG_SANOTTS_RULES_TYPE#></th>
+    <th class="st-hide-xs"><#LANG_SANOTTS_RULES_NOTE#></th>
+    <th></th>
+   </tr>
+  </thead>
+  <tbody id="sanotts_rules_body"><tr><td colspan="7">…</td></tr></tbody>
+ </table>
+
+ <div class="well well-sm" id="sanotts_rule_box">
+  <div id="sanotts_rule_form">
+   <input type="text" class="form-control" id="sr_pattern" maxlength="255" placeholder="<#LANG_SANOTTS_RULES_WHAT#>">
+   <input type="text" class="form-control" id="sr_replacement" maxlength="255" placeholder="<#LANG_SANOTTS_RULES_HOW#>">
+   <select class="form-control" id="sr_type">
+    <option value="word"><#LANG_SANOTTS_RULES_TYPE_WORD#></option>
+    <option value="text"><#LANG_SANOTTS_RULES_TYPE_TEXT#></option>
+    <option value="regex"><#LANG_SANOTTS_RULES_TYPE_REGEX#></option>
+   </select>
+   <input type="text" class="form-control st-wide" id="sr_note" maxlength="255" placeholder="<#LANG_SANOTTS_RULES_NOTE#>">
+   <div class="st-btns">
+    <label style="font-weight:normal;margin:0 10px 0 0;cursor:pointer"><input type="checkbox" id="sr_cs" style="margin:0 5px 0 0;vertical-align:-2px"><#LANG_SANOTTS_RULES_CASE#></label>
+    <button type="button" class="btn btn-default" onclick="sanottsRulePlayForm();return false" title="<#LANG_SANOTTS_RULES_PLAY_HOW#>"><span class="glyphicon glyphicon-volume-up"></span></button>
+    <button type="button" class="btn btn-success" id="sr_submit" onclick="sanottsRuleSubmit();return false"><span class="glyphicon glyphicon-plus"></span> <span id="sr_submit_label"><#LANG_SANOTTS_RULES_ADD#></span></button>
+    <button type="button" class="btn btn-default" id="sr_cancel" style="display:none" onclick="sanottsRuleReset();return false"><#LANG_SANOTTS_RULES_CANCEL#></button>
+    <span id="sr_status" style="margin-left:4px"></span>
+   </div>
+  </div>
+  <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_RULES_HELP#></span>
+ </div>
+
+ <h4><#LANG_SANOTTS_RULES_TRY#></h4>
+ <div style="display:flex;gap:6px;flex-wrap:wrap">
+  <input type="text" class="form-control" id="sr_try" style="flex:1 1 300px" value="Умный дом: на кухне 23°C, влажность 45%.">
+  <button type="button" class="btn btn-default" onclick="sanottsRulePlay(document.getElementById('sr_try').value,document.getElementById('sr_try_status'));return false"><span class="glyphicon glyphicon-volume-up"></span> <#LANG_SANOTTS_RULES_PLAY#></button>
+  <button type="button" class="btn btn-default" onclick="sanottsExplain('&t64='+sanottsB64(document.getElementById('sr_try').value),document.getElementById('sr_try_explain'),document.getElementById('sr_try_status'));return false"><span class="glyphicon glyphicon-search"></span> <#LANG_SANOTTS_EXPLAIN#></button>
+ </div>
+ <span id="sr_try_status" style="display:inline-block;margin-top:4px"></span>
+ <span class="help-block"><#LANG_SANOTTS_RULES_TRY_HINT#></span>
+ <div id="sr_try_explain"></div>
+
+ <h4 style="margin-top:20px"><#LANG_SANOTTS_STRESS_TITLE#></h4>
+ <p class="help-block"><#LANG_SANOTTS_STRESS_HINT#></p>
+ <div class="st-stress" id="sanotts_stress_list">…</div>
+
+ <h4 style="margin-top:20px"><#LANG_SANOTTS_IO_TITLE#></h4>
+ <p><a href="?action=sanotts&cmd=rules_export" class="btn btn-default"><span class="glyphicon glyphicon-download-alt"></span> <#LANG_SANOTTS_EXPORT_BTN#></a></p>
+ <form action="?" method="post" enctype="multipart/form-data" name="frmImport" onsubmit="return sanottsImportCheck(this)">
+  <input type="hidden" name="tab" value="rules">
+  <input type="hidden" name="view_mode" value="rules_import">
+  <input type="file" name="rules_file" accept=".txt,.tsv,.csv,text/plain" required style="margin-bottom:8px">
+  <div class="radio" style="margin-top:0"><label><input type="radio" name="import_mode" value="add" checked> <#LANG_SANOTTS_IMPORT_ADD#></label></div>
+  <div class="radio"><label><input type="radio" name="import_mode" value="replace"> <#LANG_SANOTTS_IMPORT_REPLACE#></label></div>
+  <button type="submit" class="btn btn-primary"><span class="glyphicon glyphicon-upload"></span> <#LANG_SANOTTS_IMPORT_BTN#></button>
+  <span class="help-block"><#LANG_SANOTTS_IMPORT_HINT#></span>
+ </form>
+</fieldset>
+
+<script>
+var sanottsRules=[],sanottsRuleEdit=0;
+var SANOTTS_RULE_TYPES={word:'<#LANG_SANOTTS_RULES_TYPE_WORD#>',text:'<#LANG_SANOTTS_RULES_TYPE_TEXT#>',regex:'<#LANG_SANOTTS_RULES_TYPE_REGEX#>'};
+function sanottsRulesCall(q,cb){
+ var x=new XMLHttpRequest();
+ x.open('GET','/admin.php?action=sanotts&cmd='+q+'&_='+Date.now(),true);
+ x.onload=function(){var r=null;try{r=JSON.parse(x.responseText)}catch(e){}
+  if(!r){cb({ok:false,error:'HTTP '+x.status});return}
+  if(r.rules)sanottsRulesRender(r);
+  cb(r);};
+ x.onerror=function(){cb({ok:false,error:'HTTP'});};
+ x.send();
+}
+function sanottsEl(tag,cls,text){var e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;}
+function sanottsBtn(icon,title,cls,fn){var b=sanottsEl('button','btn btn-xs '+(cls||'btn-default'));b.type='button';b.title=title;
+ var s=sanottsEl('span','glyphicon glyphicon-'+icon);b.appendChild(s);b.onclick=function(ev){ev.preventDefault();fn();return false;};return b;}
+function sanottsRulesRender(r){
+ sanottsRules=r.rules;
+ var tb=document.getElementById('sanotts_rules_body');tb.innerHTML='';
+ if(!r.rules.length){var tr=sanottsEl('tr'),td=sanottsEl('td','',"<#LANG_SANOTTS_RULES_EMPTY#>");td.colSpan=7;td.style.color='#777';tr.appendChild(td);tb.appendChild(tr);}
+ r.rules.forEach(function(x,i){
+  var tr=sanottsEl('tr',(x.active?'':'st-off')+(x.valid?'':' st-bad'));
+  var o=sanottsEl('td','st-ord');
+  if(i>0)o.appendChild(sanottsBtn('chevron-up','<#LANG_SANOTTS_RULES_UP#>','btn-link',function(){sanottsRulesCall('rule_move&dir=up&id='+x.id,function(){});}));
+  if(i<r.rules.length-1)o.appendChild(sanottsBtn('chevron-down','<#LANG_SANOTTS_RULES_DOWN#>','btn-link',function(){sanottsRulesCall('rule_move&dir=down&id='+x.id,function(){});}));
+  tr.appendChild(o);
+  var c=sanottsEl('td'),cb=document.createElement('input');cb.type='checkbox';cb.checked=!!x.active;cb.style.margin='0';
+  cb.onchange=function(){sanottsRulesCall('rule_toggle&id='+x.id+'&active='+(cb.checked?1:0),function(){});};
+  c.appendChild(cb);tr.appendChild(c);
+  var p=sanottsEl('td','st-txt');var code=sanottsEl('code','',x.pattern);p.appendChild(code);
+  if(x.cs)p.appendChild(sanottsEl('span','st-type',' Aa'));
+  if(!x.valid)p.title='<#LANG_SANOTTS_RULES_INVALID#>';
+  tr.appendChild(p);
+  tr.appendChild(sanottsEl('td','st-txt',x.replacement===''?'—':x.replacement));
+  tr.appendChild(sanottsEl('td','st-type st-hide-xs',SANOTTS_RULE_TYPES[x.type]||x.type));
+  tr.appendChild(sanottsEl('td','st-note st-hide-xs',x.note));
+  var a=sanottsEl('td','st-act');
+  a.appendChild(sanottsBtn('volume-up','<#LANG_SANOTTS_RULES_PLAY#>','btn-default',function(){sanottsRulePlay(sanottsRuleExample(x),document.getElementById('sr_status'));}));
+  a.appendChild(document.createTextNode(' '));
+  a.appendChild(sanottsBtn('pencil','<#LANG_SANOTTS_RULES_EDIT#>','btn-default',function(){sanottsRuleLoad(x);}));
+  a.appendChild(document.createTextNode(' '));
+  a.appendChild(sanottsBtn('remove','<#LANG_SANOTTS_RULES_DELETE#>','btn-danger',function(){
+   if(!confirm('<#LANG_SANOTTS_RULES_CONFIRM_DELETE#>'.replace('%s',x.pattern)))return;
+   sanottsRulesCall('rule_delete&id='+x.id,function(){if(sanottsRuleEdit==x.id)sanottsRuleReset();});}));
+  tr.appendChild(a);
+  tb.appendChild(tr);
+ });
+ var sl=document.getElementById('sanotts_stress_list');sl.innerHTML='';
+ if(!r.stress.length){sl.appendChild(sanottsEl('span','',"<#LANG_SANOTTS_STRESS_EMPTY#>"));}
+ r.stress.forEach(function(s){
+  var w=sanottsEl('span','st-sw',s.word),d=sanottsEl('a','','×');d.href='#';d.title='<#LANG_SANOTTS_RULES_DELETE#>';
+  d.onclick=function(){w.style.opacity='.4';sanottsRulesCall('stress_delete&line='+sanottsB64(s.line),function(res){if(!res.ok)sanottsRuleStatus(res.error,true);});return false;};
+  w.appendChild(d);sl.appendChild(w);
+ });
+ if(r.stress.length>1){var all=sanottsEl('button','btn btn-xs btn-default',"<#LANG_SANOTTS_STRESS_CLEAR#>");all.type='button';
+  all.onclick=function(){if(confirm('<#LANG_SANOTTS_STRESS_CONFIRM_CLEAR#>'))sanottsRulesCall('stress_delete&all=1',function(){});return false;};
+  sl.appendChild(all);}
+}
+// Пример для ▶ у правила: слово без «*», у регулярного выражения — замена.
+function sanottsRuleExample(x){
+ if(x.type==='word')return x.pattern.replace(/\*+$/,'');
+ if(x.type==='text')return x.pattern;
+ return x.replacement.replace(/\$\d+/g,'');
+}
+function sanottsRuleStatus(msg,bad){var s=document.getElementById('sr_status');s.style.color=bad?'#dc3545':'#28a745';s.textContent=msg||'';
+ if(!bad&&msg)setTimeout(function(){if(s.textContent===msg)s.textContent='';},2500);}
+function sanottsRuleLoad(x){
+ sanottsRuleEdit=x.id;
+ document.getElementById('sr_pattern').value=x.pattern;
+ document.getElementById('sr_replacement').value=x.replacement;
+ document.getElementById('sr_type').value=x.type;
+ document.getElementById('sr_note').value=x.note;
+ document.getElementById('sr_cs').checked=!!x.cs;
+ document.getElementById('sr_submit_label').textContent='<#LANG_SANOTTS_RULES_SAVE#>';
+ document.getElementById('sr_cancel').style.display='';
+ document.getElementById('sanotts_rule_box').scrollIntoView({behavior:'smooth',block:'center'});
+ document.getElementById('sr_pattern').focus();
+}
+function sanottsRuleReset(){
+ sanottsRuleEdit=0;
+ ['sr_pattern','sr_replacement','sr_note'].forEach(function(i){document.getElementById(i).value='';});
+ document.getElementById('sr_type').value='word';document.getElementById('sr_cs').checked=false;
+ document.getElementById('sr_submit_label').textContent='<#LANG_SANOTTS_RULES_ADD#>';
+ document.getElementById('sr_cancel').style.display='none';
+}
+function sanottsRuleSubmit(){
+ var p=document.getElementById('sr_pattern').value,r=document.getElementById('sr_replacement').value;
+ var q='rule_save&id='+sanottsRuleEdit+'&lang=ru&type='+document.getElementById('sr_type').value+
+  '&p='+sanottsB64(p)+'&r='+sanottsB64(r)+'&n='+sanottsB64(document.getElementById('sr_note').value)+
+  '&cs='+(document.getElementById('sr_cs').checked?1:0);
+ sanottsRulesCall(q,function(res){
+  if(!res.ok){sanottsRuleStatus(res.error,true);return}
+  sanottsRuleStatus('✓',false);sanottsRuleReset();
+ });
+}
+// ▶ в форме: как прозвучит замена (для «Слово» — без «*»).
+function sanottsRulePlayForm(){
+ var r=document.getElementById('sr_replacement').value.replace(/\*/g,'').replace(/\$\d+/g,'');
+ if(!/\S/.test(r))r=document.getElementById('sr_pattern').value.replace(/\*+$/,'');
+ sanottsRulePlay(r,document.getElementById('sr_status'));
+}
+function sanottsImportCheck(f){
+ var m=f.querySelector('input[name=import_mode]:checked');
+ if(m&&m.value==='replace')return confirm('<#LANG_SANOTTS_IMPORT_CONFIRM_REPLACE#>');
+ return true;
+}
+sanottsRulesCall('rules_list',function(r){if(!r.ok)sanottsRuleStatus(r.error,true);});
+document.getElementById('sr_pattern').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();sanottsRuleSubmit();}});
+document.getElementById('sr_replacement').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();sanottsRuleSubmit();}});
+document.getElementById('sr_try').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();sanottsRulePlay(this.value,document.getElementById('sr_try_status'));}});
+</script>
