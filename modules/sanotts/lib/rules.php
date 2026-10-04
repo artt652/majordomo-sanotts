@@ -73,6 +73,9 @@ class SanottsRules
             if ($base === '' || strpos($base, '*') !== false) return '«*» — только в конце слова';
             if (!preg_match('/^[' . self::W . ']/u', $base)) return 'слово должно начинаться с буквы или цифры (для знаков — тип «Любой текст»)';
         }
+        // «+» в замене — отметка ударения: только перед гласной (д+ома), иначе
+        // она прозвучит как есть.
+        if (preg_match('/\+(?![аеёиоуыэюяАЕЁИОУЫЭЮЯ])/u', $replacement)) return '«+» ставится прямо перед ударной гласной: д+ома, +Яндекс';
         if ($type === 'regex') {
             $re = self::regexOf($pattern, false);
             set_error_handler(function () { return true; });
