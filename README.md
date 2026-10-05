@@ -80,9 +80,6 @@ sanoTTS звучат в браузерной демо-версии. Движок
    (`--voice=german` — другой голос.)
 3. Проверьте звук кнопкой **«Проверить»** на вкладке настроек.
 
-> Если установлен и `piper_tts`, оба модуля ответят на `SAY` — фраза прозвучит дважды.
-> Оставьте активным один.
-
 Вручную:
 ```bash
 cd /var/www/html/cms/sanotts
@@ -98,7 +95,7 @@ echo "Привет, мир!" | bin/sanotts_cli -d share/espeak-ng-data -v voices
 
 Каталог `cms/sanotts/voices/<имя>/` с `meta.json`, `front_f16.bin` (или `front_f32.bin`) и
 `dec_f16.bin` — формат `web/voices/<key>/` репозитория sanoTTS. В `meta.json` используются
-`espeak_voice`, `g2p_voice_slot` (русский — `10`), `sample_rate`, `length_scale`. Владелец — `www-data`.
+`espeak_voice`, `g2p_voice_slot` (русский — `10`), `sample_rate`, `length_scale`.
 
 **Как обучить свой голос.** Голоса sanoTTS — маленькие «ученики», дистиллированные из голоса Piper
 (учителя): тембр и манера речи — его. Инструкция — [distillation-recipe.md](https://github.com/Ampixa/sanoTTS/blob/master/docs/distillation-recipe.md) в репозитории
@@ -169,7 +166,7 @@ sanoTTS и espeak-ng и как всё пересобрать. Модуль ск�
 
 ## Android: KSWEB
 
-Модуль работает и в KSWEB (веб-сервер для Android), проверено на Android с aarch64 и PHP 7.4.
+Модуль работает и в KSWEB (веб-сервер для Android), проверено на Android с aarch64 и PHP 8.2.4
 Установка — как обычно, кнопкой «Установить движок»; в журнале будет несколько лишних строк,
 это нормально:
 
@@ -333,5 +330,4 @@ ONNX) с тем же порядком вычислений, исходник —
 ## Лицензии
 
 Код модуля (PHP, JS) — MIT; модель libtashkeel (mush42) — MIT; словарь ё eyo-kernel — MIT.
-Движок ([sanotts-engine](https://github.com/artt652/sanotts-engine)) включает sanoTTS и espeak-ng — он, как и голоса, под GPL-3.0;
-его исходники — в том же репозитории.
+Движок ([sanotts-engine](https://github.com/artt652/sanotts-engine)) включает sanoTTS и espeak-ng — он, как и голоса, GPL-3.0.

@@ -2,7 +2,7 @@
 
 /**
  * sanoTTS — модуль синтеза речи для MajorDoMo на движке sanoTTS
- * (https://github.com/Ampixa/sanoTTS). Построен по образцу piper_tts.
+ * (https://github.com/Ampixa/sanoTTS).
  *
  * Движок — нативная утилита sanotts_cli (~0,5 МБ): тот же C-код, которым
  * голоса sanoTTS звучат в браузере, со встроенным espeak-ng; готовые сборки
@@ -14,7 +14,7 @@ require_once dirname(__FILE__) . '/lib/rules.php';
 
 class sanotts extends module
 {
-    const VERSION = '3.2.0';
+    const VERSION = '3.2.1';
     // Движок живёт внутри MajorDoMo (cms/sanotts, см. defaultBase()): туда
     // пишет пользователь веб-сервера на любой системе — Debian, Docker, Termux —
     // без root и sudo.
