@@ -55,6 +55,12 @@ class SanottsEngine
         return self::isWindows() ? 'sanotts_cli.exe' : 'sanotts_cli';
     }
 
+    /** Проигрыватель WAV для Android (AAudio / OpenSL ES): sanotts_play. */
+    public static function playerName()
+    {
+        return 'sanotts_play';
+    }
+
     /** Утилита огласовок для арабского: sanotts_tashkeel(.exe). */
     public static function tashkeelName()
     {
@@ -120,15 +126,32 @@ class SanottsEngine
     }
 
     /**
-     * Окружение для наших программ. KSWEB передаёт PHP переменную
-     * LD_LIBRARY_PATH с буквальным текстом «$LD_LIBRARY_PATH» — загрузчик Android
-     * при каждом запуске пишет о ней два предупреждения. Неабсолютные пути из
-     * неё убираем; если чистить нечего — null (окружение наследуется как есть).
+     * Окружение запускаемой программы. Нашим программам (sanotts_cli,
+     * sanotts_tashkeel, sanotts_play) нужны только системные libc/libm/libdl,
+     * поэтому LD_LIBRARY_PATH и LD_PRELOAD для них убираются целиком: веб-сервер
+     * (KSWEB и т. п.) передаёт PHP каталог своих библиотек, и его libjpeg ломает
+     * загрузку OpenSL ES в sanotts_play. Внешним программам (paplay, aplay…)
+     * LD_LIBRARY_PATH оставляем, убирая только неабсолютные пути (KSWEB передаёт
+     * буквальный «$LD_LIBRARY_PATH» — загрузчик Android ругается на него).
+     * null — окружение наследуется как есть.
      */
-    public static function childEnv()
+    public static function childEnv(array $args = array())
     {
+        if (self::isWindows()) return null;
+        $own = false;
+        foreach (array_slice($args, 0, 2) as $a) {
+            if (in_array(basename((string)$a), array(self::cliName(), self::tashkeelName(), self::playerName()), true)) $own = true;
+        }
         $ld = getenv('LD_LIBRARY_PATH');
-        if ($ld === false || self::isWindows()) return null;
+        $pre = getenv('LD_PRELOAD');
+        if ($own) {
+            if ($ld === false && $pre === false) return null;
+            $env = getenv();
+            if (!is_array($env) || !$env) return null;
+            unset($env['LD_LIBRARY_PATH'], $env['LD_PRELOAD']);
+            return $env;
+        }
+        if ($ld === false) return null;
         $keep = array();
         foreach (explode(':', $ld) as $p) if ($p !== '' && $p[0] === '/') $keep[] = $p;
         if (implode(':', $keep) === $ld) return null;
@@ -274,6 +297,21 @@ class SanottsEngine
         return self::installProgram($src, self::binDir($base), self::tashkeelName());
     }
 
+    /**
+     * Проигрыватель sanotts_play (только Android) — рядом с движком.
+     * Ошибка — строка, успех — null; для платформы без проигрывателя — null.
+     */
+    public static function ensurePlayerProgram($native, $base, $log = null)
+    {
+        $c = self::engineSource($native, self::playerName());
+        if ($c === null) return null;
+        $dst = self::binDir($base) . '/' . self::playerName();
+        if (self::matches($dst, $c)) return null;
+        list($src, $err) = self::obtainProgram($native, $base, self::playerName(), $log);
+        if ($err !== null) return $err;
+        return self::installProgram($src, self::binDir($base), self::playerName());
+    }
+
     /** Скачивает веса модели огласовок (2,4 МБ), если их нет. Ошибка — строка, успех — null. */
     public static function ensureTashkeelModel($native, $base, $log = null)
     {
@@ -392,7 +430,7 @@ class SanottsEngine
             } else {
                 $cmd = implode(' ', array_map('escapeshellarg', $args));
             }
-            $proc = @proc_open($cmd, $spec, $pipes, null, self::childEnv(), array('bypass_shell' => true));
+            $proc = @proc_open($cmd, $spec, $pipes, null, self::childEnv($args), array('bypass_shell' => true));
             if (is_resource($proc)) {
                 if ($stdin !== '') fwrite($pipes[0], $stdin);
                 fclose($pipes[0]);
@@ -443,7 +481,7 @@ class SanottsEngine
         if ($errFile === false) return null;
         $spec = array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('file', $errFile, 'a'));
         $cmd = PHP_VERSION_ID >= 70400 ? $args : implode(' ', array_map('escapeshellarg', $args));
-        $proc = @proc_open($cmd, $spec, $pipes, null, self::childEnv(), array('bypass_shell' => true));
+        $proc = @proc_open($cmd, $spec, $pipes, null, self::childEnv($args), array('bypass_shell' => true));
         if (!is_resource($proc)) { @unlink($errFile); return null; }
         if ($stdin !== '') fwrite($pipes[0], $stdin);
         fclose($pipes[0]);
@@ -874,13 +912,12 @@ class SanottsEngine
         $this->say('Self-test...');
         $wav = self::tmpDir() . '/sanotts_selftest_' . getmypid() . '.wav';
         @unlink($wav);
-        // Первое предложение примера на языке голоса: «Проверка связи.», «Hallo!» —
-        // без чисел, которые модуль перед синтезом переводит в слова.
+        // Пример на языке голоса целиком (несколько секунд речи): по нему же меряем
+        // скорость синтеза на этом устройстве — с одним коротким словом время
+        // ушло бы в основном на запуск движка.
         $samples = self::samplePhrases();
         $lang = $this->voiceDict($this->voice);
         $text = isset($samples[$lang]) ? $samples[$lang] : 'Test.';
-        $parts = preg_split('/(?<=[.!?\x{3002}\x{FF01}])\s*/u', $text, 2);
-        $text = $parts[0];
         if ($lang === 'ar') {
             $d = self::diacritize($this->base, $text, $err);
             if ($d !== null) {
@@ -890,12 +927,74 @@ class SanottsEngine
                 $this->say('  WARNING: огласовки не расставлены: ' . $err);
             }
         }
+        $t0 = microtime(true);
         list($launched, $rc, $out) = self::run(array($this->bin(), '-d', $this->data(),
             '-v', $this->voicesDir . '/' . $this->voice, '-o', $wav), $text);
+        $took = microtime(true) - $t0;
         if ($out !== '') $this->say('  ' . str_replace("\n", "\n  ", $out));
         $ok = $launched && is_file($wav) && filesize($wav) > 44;
+        if ($ok) $this->saveSpeed($wav, $took);
         @unlink($wav);
         if (!$ok) $this->fail('самопроверка не прошла' . ($launched ? " (rc=$rc)" : ': ' . $out));
+    }
+
+    /**
+     * Скорость синтеза на этом устройстве — по самопроверке: во сколько раз
+     * синтез быстрее воспроизведения получившегося звука, пересчитанная на голос
+     * Ирина (irina) по каталогу голосов, если проверяли другим голосом.
+     * Пишется в BASE/speed.json; модуль показывает её во вкладке «Голоса».
+     */
+    private function saveSpeed($wav, $took)
+    {
+        $sec = self::wavSeconds($wav);
+        if ($sec <= 0 || $took <= 0) return;
+        $factor = $sec / $took;
+        $cat = self::voiceCatalogRows($this->native);
+        $sv = isset($cat[$this->voice]) ? (float)$cat[$this->voice] : 0.0;
+        $si = isset($cat['irina']) ? (float)$cat['irina'] : 0.0;
+        if ($this->voice !== 'irina') {
+            if ($sv <= 0 || $si <= 0) return;
+            $factor = $factor * $si / $sv;
+        }
+        @file_put_contents($this->base . '/speed.json', json_encode(array(
+            'irina' => round($factor, 3), 'voice' => $this->voice,
+            'audio' => round($sec, 2), 'synth' => round($took, 2), 'time' => date('c'))));
+        $this->say(sprintf('  speed: %.2f s of audio in %.2f s (%s)', $sec, $took, $this->voice));
+    }
+
+    /** Длительность WAV по заголовку (секунды) или 0. */
+    public static function wavSeconds($wav)
+    {
+        $f = @fopen($wav, 'rb');
+        if (!$f) return 0.0;
+        $h = fread($f, 4096);
+        fclose($f);
+        if (strlen($h) < 44 || substr($h, 0, 4) !== 'RIFF' || substr($h, 8, 4) !== 'WAVE') return 0.0;
+        $byteRate = 0;
+        $p = 12;
+        while ($p + 8 <= strlen($h)) {
+            $id = substr($h, $p, 4);
+            $len = unpack('V', substr($h, $p + 4, 4))[1];
+            if ($id === 'fmt ' && $p + 20 <= strlen($h)) $byteRate = unpack('V', substr($h, $p + 16, 4))[1];
+            if ($id === 'data') {
+                $size = min($len, max(0, filesize($wav) - $p - 8));
+                return $byteRate > 0 ? $size / $byteRate : 0.0;
+            }
+            $p += 8 + $len + ($len & 1);
+        }
+        return 0.0;
+    }
+
+    /** voice => скорость по каталогу (колонка speed в voices.tsv). */
+    private static function voiceCatalogRows($native)
+    {
+        $out = array();
+        foreach ((array)@file($native . '/data/voices.tsv', FILE_IGNORE_NEW_LINES) as $line) {
+            if ($line === '' || $line[0] === '#') continue;
+            $c = explode("\t", $line);
+            if (count($c) > 12 && $c[12] !== '') $out[$c[0]] = $c[12];
+        }
+        return $out;
     }
 
     private function installBinary()
@@ -950,6 +1049,11 @@ class SanottsEngine
             if (@file_put_contents($this->base . '/.bindir', $found . "\n") === false) $this->fail('не удалось записать ' . $this->base . '/.bindir');
             $dir = $found;
             $this->say("  программы установлены в $dir");
+        }
+        // Проигрыватель для динамика сервера (Android): ошибка не мешает синтезу.
+        if (self::isAndroid()) {
+            $err = self::ensurePlayerProgram($this->native, $this->base, function ($m) use ($self) { $self->say($m); });
+            if ($err !== null) $this->say('WARNING: sanotts_play: ' . $err);
         }
         // Утилита огласовок (арабский) обновляется вместе с движком, если уже стоит;
         // впервые ставится вместе с арабским голосом.

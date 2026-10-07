@@ -4,6 +4,8 @@
 
   var ws = null;
   var host = window.location.hostname;
+  // Порт задаёт prepend.php (WEBSOCKETS_PORT из config.php). 8001 — порт ядра по умолчанию,
+  // для страниц вне MajorDoMo, куда скрипт вставлен вручную без window.SANOTTS_WS_PORT.
   var port = window.SANOTTS_WS_PORT || 8001;
   var queue = [];
   var playing = false;
@@ -118,7 +120,12 @@
         var payload = typeof msg.data === 'string' ? JSON.parse(msg.data) : msg.data;
         if (!payload.EVENT_DATA || payload.EVENT_DATA.NAME !== 'SANOTTS') return;
         var data = payload.EVENT_DATA.VALUE;
-        if (data && data.COMMAND === 'PlayAudio' && data.URL) playSound(data.URL);
+        if (!data || data.COMMAND !== 'PlayAudio' || !data.URL) return;
+        // Вкладка терминала играет только фразы своего терминала (их присылает модуль
+        // «Терминалы» с учётом порога уровня терминала); вкладка без терминала — общие.
+        var mine = String(window.SANOTTS_TERMINAL || '').toUpperCase();
+        if (String(data.TERMINAL || '').toUpperCase() !== mine) return;
+        playSound(data.URL);
       } catch (e) {}
     };
 

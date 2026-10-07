@@ -33,7 +33,7 @@
  [#endif#]
 [#endif#]
 
- <table class="table table-condensed" id="sanotts_rules">
+ <div style="max-width:100%;overflow-x:auto"><table class="table table-condensed" id="sanotts_rules">
   <thead>
    <tr>
     <th style="width:28px"></th>
@@ -46,7 +46,7 @@
    </tr>
   </thead>
   <tbody id="sanotts_rules_body"><tr><td colspan="7">…</td></tr></tbody>
- </table>
+ </table></div>
 
  <div class="well well-sm" id="sanotts_rule_box">
   <div id="sanotts_rule_form">
@@ -103,7 +103,7 @@ function sanottsRulesCall(q,cb){
  var x=new XMLHttpRequest();
  x.open('GET','/admin.php?action=sanotts&cmd='+q+'&_='+Date.now(),true);
  x.onload=function(){var r=null;try{r=JSON.parse(x.responseText)}catch(e){}
-  if(!r){cb({ok:false,error:'HTTP '+x.status});return}
+  if(!r){cb({ok:false,error:sanottsHttpErr(x)});return}
   if(r.rules)sanottsRulesRender(r);
   cb(r);};
  x.onerror=function(){cb({ok:false,error:'HTTP'});};

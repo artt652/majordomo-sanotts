@@ -11,15 +11,15 @@
 <div class="st-help">
 
 <h4>Описание</h4>
-<div class="panel-group" id="st_help_accordion">
+<div class="panel-group" id="st_help_accordion" style="margin-bottom:5px">
 
     <div class="panel panel-info">
         <div class="panel-heading">
-            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_common">Общее</a>
+            <a data-toggle="collapse" href="#st_help_common">Общее</a>
         </div>
-        <div class="panel-body collapse in" id="st_help_common">
+        <div class="panel-body collapse" id="st_help_common">
             <p><strong>sanoTTS</strong> — синтез речи для MajorDoMo на движке <a href="https://github.com/Ampixa/sanoTTS" target="_blank">sanoTTS</a>: крошечные нейросетевые голоса (1–7 МБ), всё считается локально. Движок — утилита <code>sanotts_cli</code> (~0,5 МБ) со встроенным espeak-ng: тот же C-код, которым голоса звучат в браузерной версии sanoTTS. Без Python, фоновых служб и облака. Работает в Linux (x86_64, aarch64, armv7), на Android в Termux и KSWEB, в Windows (XAMPP).</p>
-            <p>Модуль озвучивает <code>SAY</code>, <code>SAYTO</code> и <code>SAYREPLY</code>: звук уходит во вкладку браузера через WebSocket или играет из динамика сервера через модуль «Терминалы».</p>
+            <p>Модуль озвучивает <code>say()</code>, <code>sayTo()</code>, <code>sayReply()</code> и <code>ask()</code>: звук уходит во вкладки браузера через WebSocket — <code>say()</code> — вкладкам без терминала и вкладкам терминалов с TTS <code>sanotts</code>, <code>sayTo()</code> — только вкладкам выбранного терминала; уровень важности фразы сравнивается с «минимальным уровнем сообщений» терминала (вкладкам без терминала — с общим <code>minMsgLevel</code>); терминал MAIN может играть из динамика сервера (галочка в настройках).</p>
             <h5>Индикаторы в заголовке</h5>
             <ul>
                 <li><strong>Голос готов / не установлен</strong> — есть ли выбранный голос.</li>
@@ -31,13 +31,13 @@
 
     <div class="panel panel-info">
         <div class="panel-heading">
-            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_voice">Голоса</a>
+            <a data-toggle="collapse" href="#st_help_voice">Голоса</a>
         </div>
         <div class="panel-body collapse" id="st_help_voice">
             <p>27 официальных голосов sanoTTS на 17 языках и 2 дополнительных русских — Ирина и Денис, обученные по инструкции sanoTTS. Ставятся на вкладке «Голоса»: скачиваются голос (1–7 МБ) и словарь espeak его языка, каждый файл сверяется по sha256.</p>
             <table class="table table-condensed">
                 <tr><th>Язык</th><th>Голоса</th></tr>
-                <tr><td>Русский</td><td><code>irina</code> — Ирина (женский, по умолчанию) и <code>denis</code> — Денис (мужской), 1,84 млн параметров; <code>russian</code> (1,57 млн), <code>russian-tiny</code> (0,51 млн, в 3–4 раза быстрее)</td></tr>
+                <tr><td>Русский</td><td><code>irina</code> — Ирина (женский, по умолчанию) и <code>denis</code> — Денис (мужской), 1,84 млн параметров; <code>russian</code> (1,57 млн), <code>russian-tiny</code> (0,51 млн, самый быстрый)</td></tr>
                 <tr><td>Немецкий, испанский, итальянский, португальский (Бразилия), чешский, румынский, турецкий</td><td><code>&lt;язык&gt;</code> и <code>&lt;язык&gt;-tiny</code></td></tr>
                 <tr><td>Французский, польский, арабский</td><td><code>french</code>, <code>polish</code>, <code>arabic</code></td></tr>
                 <tr><td>Английский (США)</td><td><code>amy</code>, <code>kristin</code>, <code>hfc</code></td></tr>
@@ -52,14 +52,14 @@
                 <li>Обучите три модели-ученика: длительностей, акустическую и декодер; затем совместное дообучение и, по желанию, финальная «полировка».</li>
                 <li>Сохраните голос в браузерном формате sanoTTS (как голоса в <code>web/voices/</code>): <code>meta.json</code> + <code>front_f16.bin</code> + <code>dec_f16.bin</code>, — и положите каталогом в <code>cms/sanotts/voices/&lt;имя&gt;/</code>. Голос появится на вкладке «Голоса».</li>
             </ol>
-            <p>Нужны Python с PyTorch и видеокарта (подойдёт Google Colab); обучение занимает часы. Так обучены дополнительные голоса Ирина и Денис. Для языка, которого в sanoTTS ещё нет, — <a href="https://github.com/Ampixa/sanoTTS/blob/master/docs/roota-language-porting-recipe.md" target="_blank">roota-language-porting-recipe.md</a>.</p>
+            <p>Нужны Python с PyTorch и видеокарта (подойдёт Google Colab); обучение занимает часы. Так обучены дополнительные голоса Ирина и Денис: один рецепт и один корпус из ~12 тыс. русских фраз (Википедия и новости из Leipzig, разговорные фразы из Tatoeba, фразы для умного дома), по 1,84 млн параметров, 22 050 Гц, ≈3,7 МБ. Ирина — по Piper ru_RU-irina-medium (данные RHVoice), три круга дообучения: UTMOS 3,26 — 87% от учителя (3,73). Денис — по Piper ru_RU-denis-medium (данные NabuCasa, CC0), два круга: UTMOS 2,48 — 78% от учителя (3,19). Для языка, которого в sanoTTS ещё нет, — <a href="https://github.com/Ampixa/sanoTTS/blob/master/docs/roota-language-porting-recipe.md" target="_blank">roota-language-porting-recipe.md</a>.</p>
             <p><strong>Арабский.</strong> Короткие гласные (харакаты) в письме обычно не пишут, а голос учился на тексте с ними. Их расставляет отдельная утилита <code>sanotts_tashkeel</code> — модель libtashkeel (MIT), та же, что у Piper. Веса (2,4 МБ) скачиваются с арабским голосом; уже расставленные огласовки сохраняются. Отключается галочкой в настройках.</p>
         </div>
     </div>
 
     <div class="panel panel-info">
         <div class="panel-heading">
-            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_ru">Русский текст: ударения, ё, числа</a>
+            <a data-toggle="collapse" href="#st_help_ru">Русский текст: ударения, ё, числа</a>
         </div>
         <div class="panel-body collapse" id="st_help_ru">
             <p>Для русских голосов текст готовят русские правила модуля (галочка «Русские правила: ударения, ё, числа», включена по умолчанию):</p>
@@ -85,7 +85,7 @@
 
     <div class="panel panel-info">
         <div class="panel-heading">
-            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_rules">Свои правила произношения</a>
+            <a data-toggle="collapse" href="#st_help_rules">Свои правила произношения</a>
         </div>
         <div class="panel-body collapse" id="st_help_rules">
             <p>На вкладке «Произношение» — свои правила чтения: сокращения, названия устройств и комнат, бренды, слова с неверным ударением. Правило — пара «что → как читать»; правила применяются по порядку сверху вниз, до встроенных русских правил, поэтому ими можно поменять и встроенное чтение. Пока — для русских голосов.</p>
@@ -103,10 +103,10 @@
 
     <div class="panel panel-info">
         <div class="panel-heading">
-            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_speed">Темп, высота, тембр, паузы, громкость</a>
+            <a data-toggle="collapse" href="#st_help_speed">Темп, высота, тембр, паузы, громкость</a>
         </div>
         <div class="panel-body collapse" id="st_help_speed">
-            <p><strong>Пресеты</strong> (Обычный, Мягкий, Яркий, Низкий, Высокий, Диктор) выставляют темп, высоту и тембр. Послушать — «Проверить», сохранить — UPDATE.</p>
+            <p><strong>Пресеты</strong> (Обычный, Мягкий, Яркий, Низкий, Высокий, Диктор) выставляют темп, высоту и тембр. Послушать — «Проверить», сохранить — «Обновить».</p>
             <p><strong>Темп</strong> — множитель к родному темпу голоса: <code>1.00</code> — как голос настроен, больше — медленнее, меньше — быстрее.</p>
             <p><strong>Высота голоса</strong> — от −8 до +8 полутонов; темп при этом не меняется: модель говорит медленнее или быстрее, и звук пересэмплируется обратно.</p>
             <p><strong>Тембр</strong> — низкие (полка 250 Гц) и высокие (полка 3500 Гц), ±12 дБ.</p>
@@ -119,25 +119,32 @@
 
     <div class="panel panel-info">
         <div class="panel-heading">
-            <a data-toggle="collapse" data-parent="#st_help_accordion" href="#st_help_cache">Воспроизведение, проверка и кэш</a>
+            <a data-toggle="collapse" href="#st_help_cache">Воспроизведение, проверка и кэш</a>
         </div>
         <div class="panel-body collapse" id="st_help_cache">
             <p><strong>По предложениям</strong> (включено по умолчанию): сообщение режется на предложения, и каждое уходит в браузер, как только готово. Первое звучит через 0,2–0,3 с, пока синтезируются следующие, и задержка не растёт с длиной сообщения. Всё сообщение синтезирует один запуск движка, плеер ставит предложения встык (Web Audio) — пауз на загрузку нет.</p>
-            <p><strong>Терминалы</strong> (звук из динамика сервера): в настройках терминала выберите тип TTS <code>sanotts</code>. Терминал получает сообщение одним файлом. Нужен проигрыватель: в Linux — <code>paplay</code>, <code>aplay</code> или <code>ffplay</code>, в Termux — <code>play-audio</code>, в Windows звук играет встроенный в PowerShell плеер.</p>
+            <p><strong>Терминалы</strong>: в настройках терминала включите «Может проговаривать» и выберите тип TTS <code>sanotts</code>.</p><ul><li>Любой терминал, кроме MAIN, — это вкладки браузера: <code>sayTo("…", 2, "имя терминала")</code> звучит только на страницах MajorDoMo, открытых как этот терминал — по адресу с <code>?terminal=имя терминала</code> (например, <code>/menu.html?terminal=kitchen</code> для терминала с системным именем <code>kitchen</code>) или с IP, указанного в поле «Хост» терминала. <code>say()</code> звучит и во вкладках без терминала (обычные страницы MajorDoMo). Вкладка, открытая как терминал, играет только фразы своего терминала — с его «минимальным уровнем сообщений»; если у терминала другой тип TTS или выключено «Может проговаривать», модуль её не озвучивает.</li><li>Терминал MAIN — сам сервер. Как он звучит, выбирает галочка «Терминал MAIN: играть динамиком сервера» в настройках (включена по умолчанию):<ul><li>включена — из динамика компьютера, где работает MajorDoMo (Raspberry Pi с колонкой, ПК, телефон с Termux). Нужен проигрыватель: в Linux — <code>paplay</code>, <code>aplay</code> или <code>ffplay</code>; на Android — <code>sanotts_play</code>, который ставится вместе с движком (системные AAudio / OpenSL ES, громкость — канал «Ассистент», где его нет — «Медиа»); в Windows — встроенный в PowerShell плеер. Если проигрыватель не сработал, модуль пробует следующий и пишет причину в журнал; если проигрывателя на сервере нет, под галочкой в настройках появится предупреждение — установите проигрыватель или снимите галочку;</li><li>выключена — как любой другой терминал: во вкладках, открытых как MAIN (<code>?terminal=MAIN</code> или вход с IP из поля «Хост» терминала MAIN).</li></ul></li><li><strong>Плеер терминала</strong> — галочка «Играть плеером терминала (если настроен)», по умолчанию выключена. С ней терминал, у которого в карточке включено «может проигрывать» и выбран тип плеера (Kodi, MPD, VLC, Chromecast, MajorDroid…), получает фразу своим плеером: модуль отдаёт ему ссылку на файл через модуль app_player. Адрес сервера в ссылке задаётся полем «Адрес для ссылки плееру» (появляется под галочкой) — по нему плеер скачивает файл, поэтому он должен открываться с устройства, вместе с портом веб-сервера (например, <code>http://192.168.1.10:8080</code>); правка ядра не нужна. Пустое поле — адрес выбирается автоматически: IP сервера в домашней сети (сначала <code>192.168.*</code>, потом <code>172.16–31.*</code>, потом <code>10.*</code>) и порт из <code>BASE_URL</code>. Адрес меняется только при сохранении настроек. Терминалы без плеера звучат как раньше — во вкладках или динамиком сервера; у MAIN с галочкой «играть динамиком сервера» звучит только динамик, даже если у него настроен плеер. Музыку, игравшую до фразы, плеер сам не возобновит.</li><li>Терминалы с другим типом TTS (MediaPlayer, MajorDroid и т. д.) модуль не озвучивает — <code>sayTo()</code> на них озвучивает их собственный TTS. Нужен голос sanoTTS — выберите у терминала тип <code>sanotts</code> (для плеера — с галочкой «Играть плеером терминала») или заведите для него второй терминал. Кнопка «Отправить» тоже работает только с терминалами типа <code>sanotts</code>.</li></ul>
             <p><strong>«Проверить» и «Скачать»</strong> берут голос, темп, высоту и тембр прямо со страницы — сохранять перед прослушиванием не нужно. Длина текста не ограничена. Один файл (SAYTO, «Скачать») — до 10 минут речи; по предложениям ограничения нет.</p>
+            <p><strong>«Отправить»</strong> проверяет путь, которым звучат фразы из сценариев: текст синтезируется в кэш, как при <code>say()</code>/<code>sayTo()</code>, и уходит либо во вкладки без терминала («Браузеры (как say)»), либо на выбранный терминал через модуль «Терминалы». Под кнопкой — что получилось на каждом шаге: где лежит файл, какую ссылку получит плеер терминала, кому передано. Голос и параметры — со страницы, как у «Проверить».</p>
+            <p>Фразы из сценариев доходят до модуля фоновым запросом MajorDoMo к самому себе по <code>BASE_URL</code> из <code>config.php</code>. Если этот адрес не отвечает (например, веб-сервер на порту 8080, а в <code>BASE_URL</code> порт не указан), модуль о фразе не узнаёт и файл не создаётся — над вкладками тогда будет красное предупреждение.</p>
             <p><strong>Кэш:</strong> каждая фраза сохраняется в <code>cms/cached/voice/sanotts_*.wav</code>; ключ зависит от текста, голоса и всех параметров. Галочка «Удалять редкоиспользуемые фразы» (включена по умолчанию) удаляет файлы, к которым не обращались 10 дней.</p>
-            <p>Звук уходит в браузер событием <code>SANOTTS</code> через WebSocket ядра; плеер <code>sanotts.js</code> подключается ко всем страницам сам (через общий <code>modules/prepend.php</code>). Для SPA-панелей добавьте перед <code>&lt;/body&gt;</code>: <code>&lt;script src="/templates/sanotts/js/sanotts.js"&gt;&lt;/script&gt;</code></p>
+            <p>Звук уходит в браузер событием <code>SANOTTS</code> через WebSocket ядра; плеер <code>sanotts.js</code> подключается ко всем страницам сам (кроме админки) — через загрузчик <code>cms/sanotts/prepend_loader.php</code>, который PHP выполняет перед каждой страницей (<code>auto_prepend_file</code>). Он подключает плееры всех установленных модулей (как общий <code>modules/prepend.php</code>) и лежит в каталоге движка, поэтому не пропадёт при удалении этого или других модулей. При установке модуль прописывает его двумя способами, каждый срабатывает только там, где нужен:</p>
+            <ul>
+                <li><code>.htaccess</code> — блок <code>php_value</code> внутри <code>&lt;IfModule mod_php…&gt;</code>: Apache, в котором PHP подключён модулем (mod_php);</li>
+                <li><code>.user.ini</code> в корне MajorDoMo — PHP в режиме FastCGI (php-fpm, php-cgi: nginx, lighttpd, Termux, KSWEB, Docker). PHP перечитывает его раз в 5 минут, поэтому сразу после установки плеер может появиться не мгновенно. Скачивание <code>.user.ini</code> модуль запрещает в <code>.htaccess</code>; в nginx и lighttpd закройте его в конфигурации сервера.</li>
+            </ul>
+            <p>Уже настроенное модуль не трогает: если <code>auto_prepend_file</code> задан в <code>php.ini</code> или конфигурации сервера другим файлом, ни <code>.htaccess</code>, ни <code>.user.ini</code> не меняются — иначе тот файл перестал бы подключаться. Тогда в предупреждении будет строка <code>include_once '…/cms/sanotts/prepend_loader.php';</code> — добавьте её в тот файл, и заработают оба. Чужие и вписанные вручную строки не удаляются и при удалении модуля.</p>
+            <p>Если плеер не подключился, над вкладками появится предупреждение с причиной. Для SPA-панелей и шаблонов, которые открываются не через MajorDoMo, добавьте перед <code>&lt;/body&gt;</code>: <code>&lt;script src="/templates/sanotts/js/sanotts.js"&gt;&lt;/script&gt;</code>. Если WebSocket MajorDoMo не на порту 8001 (<code>WEBSOCKETS_PORT</code> в <code>config.php</code>), перед ним укажите порт: <code>&lt;script&gt;window.SANOTTS_WS_PORT=8002&lt;/script&gt;</code></p>
         </div>
     </div>
 </div>
 
-<h4>Установка движка</h4>
 <div class="panel-group" id="st_help_install_accordion">
     <div class="panel panel-info">
         <div class="panel-heading">
-            <a data-toggle="collapse" data-parent="#st_help_install_accordion" href="#st_help_auto">Что делает кнопка «Установить движок»</a>
+            <a data-toggle="collapse" href="#st_help_auto">Что делает кнопка «Установить движок»</a>
         </div>
-        <div class="panel-body collapse in" id="st_help_auto">
+        <div class="panel-body collapse" id="st_help_auto">
             <ol>
                 <li>Скачивает готовый <code>sanotts_cli</code> под вашу систему из репозитория движка <a href="https://github.com/artt652/sanotts-engine" target="_blank">sanotts-engine</a> (~0,5 МБ, espeak-ng встроен): Linux (x86_64, aarch64, armv7, x86), Android (aarch64, arm, x86_64) или Windows (64- и 32-битная).</li>
                 <li>Скачивает список словоформ espeak-ng 1.52.0 (23 МБ) и собирает полный русский словарь (811 тыс. словоформ с ударениями), а также словарь ё eyo-kernel (0,9 МБ).</li>
@@ -158,7 +165,7 @@ C:\xampp\php\php.exe C:\xampp\htdocs\modules\sanotts\bin\install.php
     </div>
     <div class="panel panel-info">
         <div class="panel-heading">
-            <a data-toggle="collapse" data-parent="#st_help_install_accordion" href="#st_help_manual">Проверка движка вручную</a>
+            <a data-toggle="collapse" href="#st_help_manual">Проверка движка вручную</a>
         </div>
         <div class="panel-body collapse" id="st_help_manual">
 <pre>cd /var/www/html/cms/sanotts
@@ -176,17 +183,37 @@ bin\sanotts_cli.exe -d share\espeak-ng-data -v voices\irina -o t.wav -t "При�
     </div>
     <div class="panel panel-warning">
         <div class="panel-heading">
-            <a data-toggle="collapse" data-parent="#st_help_install_accordion" href="#st_help_trouble">Не звучит</a>
+            <a data-toggle="collapse" href="#st_help_trouble">Не звучит</a>
         </div>
         <div class="panel-body collapse" id="st_help_trouble">
             <ul>
                 <li>Нажмите «Проверить» на вкладке настроек. Если звук есть там — движок в порядке, ищите проблему в доставке: WebSocket, <code>prepend.php</code>, вкладка в фоне (плеер слушает только активную вкладку).</li>
                 <li>Журнал установки — ссылка «журнал» в заголовке (есть кнопка «Скопировать»); журнал модуля — <code>cms/debmes/*_sanotts.txt</code>. Вкладка «Голоса» показывает, что модуль видит на диске.</li>
-                <li>Если <code>php_value</code> в <code>.htaccess</code> не работает (PHP-FPM, <code>AllowOverride None</code>), пропишите <code>auto_prepend_file = /var/www/html/modules/prepend.php</code> в <code>php.ini</code> пула FPM.</li>
-                <li>Терминал молчит — проверьте, что на сервере есть проигрыватель (см. «Воспроизведение, проверка и кэш»).</li>
+                <li>Если над вкладками есть жёлтое предупреждение «Плеер не подключается…» — плеер не попадает на страницы; в предупреждении указаны причина и готовая строка для <code>php.ini</code>. Проверить на странице: в консоли браузера (F12) <code>window.__sanottsPlayerLoaded</code> должно быть <code>true</code>.</li>
+                <li>Терминал молчит — нажмите «Отправить» на этот терминал: отчёт покажет, ушёл ли звук во вкладки и когда терминал последний раз открывал MajorDoMo. Вкладка терминала должна быть открыта как этот терминал (<code>?terminal=имя</code>); для MAIN с галочкой «играть динамиком сервера» нужен проигрыватель на сервере (см. «Воспроизведение, проверка и кэш»).</li>
             </ul>
         </div>
     </div>
 </div>
 
 </div>
+<script>
+// Справка: при раскрытии раздела соседний (открытый) сворачивается, и страница
+// под пальцем «уезжала». Держим нажатый заголовок на том же месте экрана, пока
+// идёт анимация, — раскрытый раздел остаётся перед глазами.
+(function(){
+ if(!window.jQuery)return;
+ var $=window.jQuery;
+ $('#st_help_accordion, #st_help_install_accordion').on('show.bs.collapse', function(e){
+  var head=$(e.target).prev('.panel-heading')[0];
+  if(!head)return;
+  var y0=head.getBoundingClientRect().top, until=Date.now()+600;
+  (function keep(){
+   var d=head.getBoundingClientRect().top-y0;
+   if(Math.abs(d)>1)window.scrollBy(0,d);
+   if(Date.now()<until)requestAnimationFrame(keep);
+   else if(head.getBoundingClientRect().top<0)head.scrollIntoView();
+  })();
+ });
+})();
+</script>

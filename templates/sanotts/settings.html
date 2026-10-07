@@ -8,6 +8,14 @@
 .sanotts-presets{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .sanotts-presets .btn{width:100%;margin:0;padding-left:4px;padding-right:4px;overflow:hidden;text-overflow:ellipsis}
 .sanotts-check input[type=checkbox]{position:static;float:none;flex:0 0 auto;width:auto;height:auto;margin:3px 8px 0 0}
+/* Телефон: длинные пояснения к настройкам — свёрнуты под «подробнее», как описания голосов. */
+.sanotts-more-link{display:none;font-size:12px}
+@media (max-width:767px){
+ .sanotts-more-link{display:inline-block;margin-top:2px}
+ .help-block.sanotts-fold{display:none}
+ .help-block.sanotts-fold.open{display:block}
+}
+#sanotts_test_status:empty,#sanotts_test_explain:empty{display:none}
 </style>
 <form action="?" method="post" enctype="multipart/form-data" name="frmEdit" class="form-horizontal">
  <input type="hidden" name="mode" value="update">
@@ -46,10 +54,20 @@
     <button type="button" class="btn btn-default" style="margin-top:8px" onclick="sanottsTest();return false"><span class="glyphicon glyphicon-volume-up"></span> <#LANG_SANOTTS_TEST_BTN#></button>
     <button type="button" class="btn btn-default" style="margin-top:8px" onclick="sanottsDownload();return false"><span class="glyphicon glyphicon-download-alt"></span> <#LANG_SANOTTS_DOWNLOAD_BTN#></button>
     <button type="button" class="btn btn-default" style="margin-top:8px" onclick="sanottsExplainTest();return false"><span class="glyphicon glyphicon-search"></span> <#LANG_SANOTTS_EXPLAIN#></button>
-    <span id="sanotts_test_status" style="margin-left:8px"></span>
+    <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+     <select id="sanotts_send_to" class="form-control" style="width:auto;max-width:100%;flex:0 1 auto" title="<#LANG_SANOTTS_SEND_TO#>">
+      <option value=""><#LANG_SANOTTS_SEND_BROWSERS#></option>
+[#begin TERMINALS#]
+      <option value="[#VALUE#]" [#DISABLED#]>[#TITLE#]</option>
+[#end TERMINALS#]
+     </select>
+     <button type="button" class="btn btn-default" onclick="sanottsSend();return false"><span class="glyphicon glyphicon-send"></span> <#LANG_SANOTTS_SEND_BTN#></button>
+    </div>
+    <span class="help-block" style="margin:4px 0 0"><#LANG_SANOTTS_SEND_ONLY#></span>
+    <div id="sanotts_test_status" style="margin-top:6px"></div>
+    <ul id="sanotts_send_steps" class="text-muted" style="display:none;margin:6px 0 0;padding-left:18px;font-size:12px;overflow-wrap:anywhere"></ul>
     <audio id="sanotts_test_audio" controls style="display:none;width:100%;margin-top:8px"></audio>
     <div id="sanotts_test_explain"></div>
-    <span class="help-block"><#LANG_SANOTTS_TEST_HINT#></span>
    </div>
   </div>
   <div class="form-group">
@@ -64,6 +82,7 @@
     <button type="button" class="btn btn-default btn-sm" onclick="sanottsPreset(0.9,-1,2,2)"><#LANG_SANOTTS_PRESET_ANNOUNCER#></button>
     </div>
     <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_PRESET_HINT#></span>
+    <span class="help-block" style="margin:4px 0 0"><#LANG_SANOTTS_TEST_HINT#></span>
    </div>
   </div>
   <div class="form-group">
@@ -160,9 +179,40 @@
     <div class="sanotts-check">
      <label><input type="checkbox" name="use_cache" value="1" [#USE_CACHE#] onchange="document.getElementById('cache_cleanup_wrap').style.display=this.checked?'':'none'"> <#LANG_SANOTTS_USE_CACHE#></label>
     </div>
-    <div class="sanotts-check" id="cache_cleanup_wrap" style="margin-top:6px[#if USE_CACHE=""#];display:none[#endif#]">
+   </div>
+  </div>
+  <div class="form-group" id="cache_cleanup_wrap" style="[#if USE_CACHE=""#]display:none[#endif#]">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <div class="sanotts-check">
      <label><input type="checkbox" name="cache_cleanup" value="1" [#CACHE_CLEANUP#]> <#LANG_SANOTTS_CACHE_CLEANUP#></label>
     </div>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <div class="sanotts-check">
+     <label><input type="checkbox" name="main_speaker" value="1" [#MAIN_SPEAKER#]> <#LANG_SANOTTS_MAIN_SPEAKER#></label>
+    </div>
+    [#if MAIN_SPEAKER_NONE="1"#]<div class="text-warning" style="margin:4px 0"><#LANG_SANOTTS_MAIN_SPEAKER_NONE#></div>[#endif#]
+    <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_MAIN_SPEAKER_HINT#></span>
+   </div>
+  </div>
+  <div class="form-group">
+   <label class="control-label col-lg-4 sanotts-pad">&nbsp;</label>
+   <div class="col-lg-6">
+    <div class="sanotts-check">
+     <label><input type="checkbox" name="use_player" value="1" [#USE_PLAYER#] onchange="document.getElementById('device_base_wrap').style.display=this.checked?'':'none'"> <#LANG_SANOTTS_USE_PLAYER#></label>
+    </div>
+    <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_USE_PLAYER_HINT#></span>
+   </div>
+  </div>
+  <div class="form-group" id="device_base_wrap" style="[#if USE_PLAYER=""#]display:none[#endif#]">
+   <label class="control-label col-lg-4"><#LANG_SANOTTS_DEVICE_BASE#></label>
+   <div class="col-lg-6">
+    <input type="text" name="device_base" value="[#DEVICE_BASE#]" placeholder="[#DEVICE_BASE_AUTO#]" class="form-control">
+    <span class="help-block" style="margin-bottom:0"><#LANG_SANOTTS_DEVICE_BASE_HINT#> <b>[#DEVICE_BASE_AUTO#]</b></span>
    </div>
   </div>
   <div class="form-group">
@@ -174,7 +224,7 @@
   <div class="form-group">
    <label class="control-label col-lg-4"><#LANG_SANOTTS_WS_PORT#></label>
    <div class="col-lg-6">
-    <input type="text" name="ws_port" value="[#WS_PORT#]" class="form-control" style="max-width:120px">
+    <p class="form-control-static" style="padding-top:5px;padding-bottom:0;min-height:0"><b>[#WS_PORT#]</b> <span class="text-muted">— <#LANG_SANOTTS_WS_PORT_NOTE#></span></p>
    </div>
   </div>
   <div class="form-group">
@@ -244,7 +294,7 @@ function sanottsPrepare(cb,onerr){
   var x=new XMLHttpRequest();
   x.open('GET','/admin.php?action=sanotts&cmd=test_put&tk='+key+'&i='+i+'&d='+t64.substr(i*PART,PART)+'&_='+Date.now(),true);
   x.onload=function(){var r=null;try{r=JSON.parse(x.responseText)}catch(e){}
-   if(!r||!r.ok){onerr((r&&r.error)||('HTTP '+x.status));return}
+   if(!r||!r.ok){onerr((r&&r.error)||sanottsHttpErr(x));return}
    i++;next();};
   x.onerror=function(){onerr('HTTP');};
   x.send();
@@ -255,6 +305,28 @@ function sanottsExplainTest(){
  var st=document.getElementById('sanotts_test_status'),box=document.getElementById('sanotts_test_explain');
  st.style.color='';st.textContent='…';
  sanottsPrepare(function(params){sanottsExplain(params,box,st);},function(m){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: '+m;});
+}
+// «Отправить»: как say()/sayTo() из сценария — файл в кэше и доставка в браузеры
+// или на выбранный терминал; под кнопками — что получилось на каждом шаге.
+function sanottsSend(){
+ var st=document.getElementById('sanotts_test_status'),ul=document.getElementById('sanotts_send_steps');
+ var to=document.getElementById('sanotts_send_to').value;
+ st.style.color='';st.textContent='…';ul.style.display='none';ul.innerHTML='';
+ function li(html,color){var e=document.createElement('li');e.innerHTML=html;if(color)e.style.color=color;ul.appendChild(e);ul.style.display='';}
+ function esc(t){return String(t).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+ sanottsPrepare(function(params){
+  var x=new XMLHttpRequest();
+  x.open('GET','/admin.php?action=sanotts&cmd=test_terminal&terminal='+encodeURIComponent(to)+params+'&_='+Date.now(),true);
+  x.onload=function(){var r=null;try{r=JSON.parse(x.responseText)}catch(e){}
+   if(!r){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: '+sanottsHttpErr(x);return;}
+   (r.steps||[]).forEach(function(t){li(esc(t));});
+   if(r.warn)li(esc(r.warn),'#b8860b');
+   if(r.ok){st.style.color='#28a745';st.textContent='<#LANG_SANOTTS_SEND_DONE#>';}
+   else{st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>';li(r.error_html?r.error:esc(r.error||'?'),'#dc3545');}
+  };
+  x.onerror=function(){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: HTTP';};
+  x.send();
+ },function(m){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: '+m;});
 }
 // «Скачать»: весь текст одним WAV. Через XHR, а не переходом по ссылке, — чтобы
 // ошибку синтеза показать в строке состояния, а не открыть страницей.
@@ -312,7 +384,7 @@ function sanottsTest(){
   x.open('GET',url+'&_='+Date.now(),true);
   x.onload=function(){
    if(gen!==sanottsTestGen)return;
-   try{var r=JSON.parse(x.responseText)}catch(e){fail('HTTP '+x.status+' '+x.responseText.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').substring(0,300));finished=true;return}
+   try{var r=JSON.parse(x.responseText)}catch(e){fail(sanottsHttpErr(x));finished=true;return}
    cb(r);
   };
   x.onerror=function(){if(gen===sanottsTestGen){fail('HTTP');finished=true;}};
@@ -342,4 +414,18 @@ function sanottsTest(){
   poll();
  },function(m){if(gen===sanottsTestGen)fail(m);});
 }
+</script>
+<script>
+(function(){
+ var hs=document.querySelectorAll('form[name="frmEdit"] .help-block');
+ for(var i=0;i<hs.length;i++){
+  var h=hs[i];
+  if((h.textContent||'').replace(/\s+/g,' ').length<110)continue;
+  h.classList.add('sanotts-fold');
+  var a=document.createElement('a');
+  a.href='#';a.className='sanotts-more-link';a.innerHTML='<#LANG_SANOTTS_MORE#> &#9662;';
+  a.onclick=(function(h,a){return function(){var o=h.classList.toggle('open');a.innerHTML=o?'<#LANG_SANOTTS_LESS#> &#9652;':'<#LANG_SANOTTS_MORE#> &#9662;';return false;};})(h,a);
+  h.parentNode.insertBefore(a,h);
+ }
+})();
 </script>

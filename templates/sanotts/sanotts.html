@@ -1,8 +1,33 @@
 <script>window.SANOTTS_WS_PORT=[#WS_PORT#];</script>
-<h3>
+<style>
+/* fieldset по умолчанию не уже своего содержимого (min-width:min-content): широкая таблица распирала страницу на телефоне. */
+.sanotts-page fieldset{min-width:0}
+.sanotts-page{padding-top:16px}
+/* В теме админки у <code> — nowrap: длинные пути (Termux) уходили за экран. */
+.sanotts-page code,.sanotts-alerts code{white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+/* Телефон: «Обновить движок» и «журнал» — второй строкой, чтобы «О модуле» не съезжала. */
+@media (max-width:767px){
+ .sanotts-head{margin-top:14px}
+ .sanotts-head .sanotts-actions{display:block;margin-top:10px}
+ .sanotts-head .sanotts-actions button{margin-left:0!important}
+ .sanotts-head .sanotts-status{display:block;margin:12px 0 0!important;line-height:1.6}
+ .sanotts-hr{margin:12px 0}
+ .sanotts-head .sanotts-status>span:not(.sanotts-actions){display:inline-block;margin:0 10px 0 0!important}
+ /* Вкладки — в одну строку: компактнее; на совсем узком экране — прокрутка вбок, без переноса. */
+ .sanotts-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+ .sanotts-tabs::-webkit-scrollbar{display:none}
+ .sanotts-tabs>li{float:none;flex:0 0 auto}
+ .sanotts-tabs>li>a{padding:8px 9px;margin-right:1px;font-size:13px;white-space:nowrap}
+}
+@media (max-width:350px){ .sanotts-tabs>li>a{padding:7px 6px;font-size:12px} }
+</style>
+<h3 class="sanotts-head">
+    <span style="float:right;margin-top:4px;margin-left:8px">
+        <button class="btn btn-primary btn-sm" data-toggle="modal" data-target="#sanotts_about"><#LANG_SANOTTS_ABOUT#>&nbsp;&nbsp;<span class="glyphicon glyphicon-info-sign icon-white"></span></button>
+    </span>
     <img src="/img/modules/sanotts.png" style="width:32px;height:32px;vertical-align:middle;margin-right:8px;">
     <#LANG_SANOTTS_TITLE#>
-    <span style="margin-left:12px;font-size:13px;font-weight:normal;">
+    <span class="sanotts-status" style="margin-left:12px;font-size:13px;font-weight:normal;">
         <span title="<#LANG_SANOTTS_VOICE_STATUS#>">
             <span id="voice_status_dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:[#if VOICE_OK="1"#]#28a745[#else#]#dc3545[#endif#];vertical-align:middle;margin-right:3px"></span>
             <span id="voice_status_text" style="vertical-align:middle;">[#if VOICE_OK="1"#]<#LANG_SANOTTS_VOICE_READY#>[#else#]<#LANG_SANOTTS_VOICE_MISSING#>[#endif#]</span>
@@ -14,12 +39,11 @@
         <span style="margin-left:8px">
             <span id="install_status_dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:[#if INSTALL_STATUS="1"#]#28a745[#else#][#if INSTALL_STATUS="2"#]#ffc107[#else#]#dc3545[#endif#][#endif#];vertical-align:middle;margin-right:3px"></span>
             <span id="install_status_text" style="vertical-align:middle;">[#if INSTALL_STATUS="1"#]<#LANG_SANOTTS_INSTALLED_TRUE#>[#else#][#if INSTALL_STATUS="2"#]<#LANG_SANOTTS_INSTALLED_PENDING#>[#else#][#if INSTALL_STATUS="3"#]<#LANG_SANOTTS_INSTALLED_FAILED#>[#else#]<#LANG_SANOTTS_INSTALLED_FALSE#>[#endif#][#endif#][#endif#]</span>
+        </span>
+        <span class="sanotts-actions">
             <button id="install_engine_btn" class="btn btn-success btn-sm" style="margin-left:6px;vertical-align:middle;[#if INSTALL_STATUS="2"#]display:none[#endif#]" onclick="sanottsInstall();return false">[#if INSTALL_STATUS="1"#]<#LANG_SANOTTS_UPDATE_ENGINE#>[#else#]<#LANG_SANOTTS_INSTALL_ENGINE#>[#endif#]</button>
             <a href="#" onclick="sanottsToggleLog();return false" style="margin-left:6px;font-size:12px"><#LANG_SANOTTS_INSTALL_LOG#></a>
         </span>
-    </span>
-    <span style="float:right;margin-top:4px;">
-        <button class="btn btn-primary btn-sm" data-toggle="modal" data-target="#sanotts_about"><#LANG_SANOTTS_ABOUT#>&nbsp;&nbsp;<span class="glyphicon glyphicon-info-sign icon-white"></span></button>
     </span>
 </h3>
 <div id="sanotts_log_box" style="display:none">
@@ -29,17 +53,20 @@
     </div>
     <pre id="sanotts_install_log" style="max-height:260px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all"></pre>
 </div>
+<div class="sanotts-alerts">
 <div id="sanotts_manual" class="alert alert-danger" style="[#if INSTALL_STATUS="3"#][#else#]display:none[#endif#]"><#LANG_SANOTTS_MANUAL_HINT#><br><code style="user-select:all">[#MANUAL_INSTALL#]</code></div>
-<hr>
+[#if BASE_URL_WARN!=""#]<div class="alert alert-danger">[#BASE_URL_WARN#]</div>[#endif#]
+[#if HOOK_WARN="1"#]<div class="alert alert-warning"><b><#LANG_SANOTTS_HOOK_TITLE#></b><br>[#HOOK_HINT#]</div>[#endif#]
+</div>
+<hr class="sanotts-hr">
 
-<ul class="nav nav-tabs">
+<ul class="nav nav-tabs sanotts-tabs">
     <li [#if TAB_SETTINGS="1"#]class="active"[#endif#]><a href="?action=sanotts&tab=settings"><#LANG_SANOTTS_SETTINGS#></a></li>
     <li [#if TAB_MODELS="1"#]class="active"[#endif#]><a href="?action=sanotts&tab=models"><#LANG_SANOTTS_MODEL_MANAGEMENT#></a></li>
     <li [#if TAB_RULES="1"#]class="active"[#endif#]><a href="?action=sanotts&tab=rules"><#LANG_SANOTTS_RULES_TAB#></a></li>
     <li [#if TAB_HELP="1"#]class="active"[#endif#]><a href="?action=sanotts&tab=help"><#LANG_SANOTTS_HELP#></a></li>
 </ul>
-<br>
-
+<div class="sanotts-page">
 [#if TAB_SETTINGS="1"#]
     [#inc settings.html#]
 [#endif#]
@@ -52,6 +79,7 @@
 [#if TAB_HELP="1"#]
     [#inc help.html#]
 [#endif#]
+</div>
 [#inc about.html#]
 
 <style>
@@ -80,12 +108,15 @@ function sanottsRulePlay(text,st){
  x.send();
 }
 // «Разбор»: params — то же, что у «Проверить» (&t64=… или &tk=…, &voice=…).
+// Ответ сервера не JSON — в сообщение начало ответа (ошибка PHP и т. п.), чтобы была видна причина.
+function sanottsHttpErr(x){var b=String(x.responseText||'').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').replace(/^\s+|\s+$/g,'');
+ return 'HTTP '+x.status+(b?' '+b.substring(0,300):' (<#LANG_SANOTTS_EMPTY_REPLY#>)');}
 function sanottsExplain(params,box,st){
  if(st){st.style.color='';st.textContent='…';}
  var x=new XMLHttpRequest();
  x.open('GET','/admin.php?action=sanotts&cmd=test_explain'+params+'&_='+Date.now(),true);
  x.onload=function(){var r=null;try{r=JSON.parse(x.responseText)}catch(e){}
-  if(!r||r.original===undefined){if(st){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>'+(r&&r.error?': '+r.error:'');}return}
+  if(!r||r.original===undefined){if(st){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: '+(r&&r.error?r.error:(r?'?':sanottsHttpErr(x)));}return}
   if(st)st.textContent='';
   sanottsExplainShow(r,box);};
  x.onerror=function(){if(st){st.style.color='#dc3545';st.textContent='<#LANG_SANOTTS_TEST_FAIL#>: HTTP';}};

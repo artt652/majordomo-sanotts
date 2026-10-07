@@ -2,7 +2,7 @@
 
 /**
  * sanoTTS — модуль синтеза речи для MajorDoMo на движке sanoTTS
- * (https://github.com/Ampixa/sanoTTS).
+ * (https://github.com/Ampixa/sanoTTS). Построен по образцу piper_tts.
  *
  * Движок — нативная утилита sanotts_cli (~0,5 МБ): тот же C-код, которым
  * голоса sanoTTS звучат в браузере, со встроенным espeak-ng; готовые сборки
@@ -14,7 +14,7 @@ require_once dirname(__FILE__) . '/lib/rules.php';
 
 class sanotts extends module
 {
-    const VERSION = '3.2.1';
+    const VERSION = '3.2.2';
     // Движок живёт внутри MajorDoMo (cms/sanotts, см. defaultBase()): туда
     // пишет пользователь веб-сервера на любой системе — Debian, Docker, Termux —
     // без root и sudo.
@@ -112,6 +112,9 @@ class sanotts extends module
             'USE_CACHE'        => '1',
             'CACHE_DIR'        => dirname(self::defaultBase()) . '/cached/voice',
             'CACHE_CLEANUP'    => '1',
+            'MAIN_SPEAKER'     => '1',   // терминал MAIN (сам сервер) — динамиком сервера
+            'USE_PLAYER'       => '0',   // терминалы с настроенным плеером — им (app_player)
+            'DEVICE_BASE'      => '',    // адрес сервера для ссылки плееру; пусто — автоматически
             'TASHKEEL'         => '1',
             'STREAM'           => '1',
             'RU_RULES'         => '1',
@@ -127,9 +130,6 @@ class sanotts extends module
             if (!isset($this->config[$k]) || trim((string)$this->config[$k]) === '') {
                 $this->config[$k] = $v;
             }
-        }
-        if (!isset($this->config['WS_PORT']) || !preg_match('/^\d+$/', (string)$this->config['WS_PORT'])) {
-            $this->config['WS_PORT'] = defined('WEBSOCKETS_PORT') ? (string)WEBSOCKETS_PORT : '8001';
         }
 
         // Программы — во внутреннем каталоге приложения (Android, сайт на /storage,
@@ -289,11 +289,10 @@ class sanotts extends module
         }
     }
 
+    /** Порт WebSocket-сервера MajorDoMo: WEBSOCKETS_PORT из config.php (ядро по умолчанию — 8001). */
     private function getWsPort()
     {
-        if (defined('WEBSOCKETS_PORT')) return (int)WEBSOCKETS_PORT;
-        $port = (int)$this->config['WS_PORT'];
-        return $port > 0 ? $port : 8001;
+        return defined('WEBSOCKETS_PORT') && (int)WEBSOCKETS_PORT > 0 ? (int)WEBSOCKETS_PORT : 8001;
     }
 
     private function isWsAlive()
@@ -417,11 +416,11 @@ class sanotts extends module
         $out = array();
         foreach (self::tsv('voices.tsv') as $c) {
             if (count($c) < 6 || self::sanitizeVoice($c[0]) === null) continue;
-            $c = array_pad($c, 15, '');
+            $c = array_pad($c, 16, '');
             $out[$c[0]] = array('espeak' => $c[1], 'dict' => $c[2], 'language' => self::languageName($c[2]),
                 'size' => (int)$c[5], 'params' => (int)$c[6], 'rate' => (int)$c[7], 'gender' => $c[8],
                 'teacher' => $c[9], 'wer' => $c[10], 'scoreq' => $c[11], 'speed' => $c[12],
-                'note' => $ru ? $c[13] : ($c[14] !== '' ? $c[14] : $c[13]), 'files' => array());
+                'note' => $ru ? $c[13] : ($c[14] !== '' ? $c[14] : $c[13]), 'utmos' => $c[15], 'files' => array());
         }
         foreach (self::tsv('sources.tsv') as $c) {
             if (count($c) < 6 || $c[0] !== 'voice' || !isset($out[$c[1]])) continue;
@@ -449,24 +448,43 @@ class sanotts extends module
      * Скорость голоса — относительно основного голоса russian: сама скорость
      * синтеза зависит от процессора, а соотношение между голосами — нет.
      */
-    private static function speedText($speed)
+    /**
+     * Самопроверка установщика (BASE/speed.json): во сколько раз синтез быстрее
+     * воспроизведения на этом устройстве, приведённое к голосу irina (внутренняя
+     * точка отсчёта каталога), и каким голосом измеряли. 0 — замера нет.
+     */
+    private static $deviceSpeed = 0.0;
+    private static $speedVoice = '';
+
+    /**
+     * Скорость синтеза на этом устройстве — во сколько раз быстрее или медленнее
+     * воспроизведения. Измеренный при установке голос — по замеру, остальные —
+     * оценка (≈): замер × отношение скоростей голосов из каталога.
+     */
+    private static function speedText($speed, $name)
     {
         static $base = null;
         if ($base === null) {
             $cat = self::voiceCatalog();
-            $base = isset($cat['russian']) && $cat['russian']['speed'] !== '' ? (float)$cat['russian']['speed'] : 0.0;
+            $base = isset($cat['irina']) && $cat['irina']['speed'] !== '' ? (float)$cat['irina']['speed'] : 0.0;
         }
-        if ($base <= 0 || $speed <= 0) return '';
-        $r = $speed / $base;
-        if ($r >= 0.9 && $r <= 1.1) return abs($r - 1) < 0.001 ? LANG_SANOTTS_SPEED_BASE : LANG_SANOTTS_SPEED_SAME;
-        return $r > 1 ? sprintf(LANG_SANOTTS_SPEED_FASTER, self::num($r, 1)) : sprintf(LANG_SANOTTS_SPEED_SLOWER, self::num(1 / $r, 1));
+        if (self::$deviceSpeed <= 0) return '';
+        if ($name === 'irina') {
+            $f = self::$deviceSpeed;
+        } else {
+            if ($base <= 0 || $speed <= 0) return '';
+            $f = self::$deviceSpeed * $speed / $base;
+        }
+        $t = ($f >= 0.95 && $f <= 1.05) ? LANG_SANOTTS_SPEED_REALTIME
+            : ($f > 1 ? sprintf(LANG_SANOTTS_SPEED_RT_FASTER, self::num($f, 1)) : sprintf(LANG_SANOTTS_SPEED_RT_SLOWER, self::num(1 / $f, 1)));
+        return $name === self::$speedVoice ? $t : sprintf(LANG_SANOTTS_SPEED_ESTIMATE, $t);
     }
 
     /**
      * Описание голоса для списка: пол · размер модели · частота · учитель;
      * вторая строка — оценки качества и скорость. array(desc, quality).
      */
-    private static function voiceDescription($info)
+    private static function voiceDescription($info, $name = '')
     {
         $d = array();
         if ($info['gender'] === 'f') $d[] = LANG_SANOTTS_GENDER_F;
@@ -482,8 +500,12 @@ class sanotts extends module
             $q[] = $metric . ' ' . self::num($v, $v < 10 ? 1 : 0) . '%';
         }
         if ($info['scoreq'] !== '') $q[] = 'SCOREQ ' . self::num($info['scoreq'], 2) . '/5';
-        if ($info['speed'] !== '') $q[] = self::speedText((float)$info['speed']);
-        if ($info['wer'] === '' && $info['scoreq'] === '' && $info['teacher'] !== '') array_unshift($q, LANG_SANOTTS_NOT_MEASURED);
+        // UTMOS голоса/учителя (дополнительные голоса): «UTMOS 3,26 — 87% от учителя».
+        if (!empty($info['utmos']) && preg_match('#^([\d.]+)/([\d.]+)$#', $info['utmos'], $um) && (float)$um[2] > 0) {
+            $q[] = sprintf(LANG_SANOTTS_UTMOS, self::num($um[1], 2), (int)round(100 * $um[1] / $um[2]));
+        }
+        if ($info['speed'] !== '' || $name === 'irina') { $st = self::speedText((float)$info['speed'], $name); if ($st !== '') $q[] = $st; }
+        if ($info['wer'] === '' && $info['scoreq'] === '' && empty($info['utmos']) && $info['teacher'] !== '') array_unshift($q, LANG_SANOTTS_NOT_MEASURED);
         return array(implode(' · ', $d), implode(' · ', $q));
     }
 
@@ -550,6 +572,10 @@ class sanotts extends module
         }
         // Утилита огласовок нужна только арабскому голосу; обновляется, если уже стоит.
         if (is_file($binDir . '/' . SanottsEngine::tashkeelName())) $progs[] = SanottsEngine::tashkeelName();
+        // Проигрыватель для динамика сервера на Android — ставится и обновляется сам.
+        if (SanottsEngine::isAndroid() && SanottsEngine::engineSource($native, SanottsEngine::playerName()) !== null) {
+            $progs[] = SanottsEngine::playerName();
+        }
         foreach ($progs as $name) {
             $c = SanottsEngine::engineSource($native, $name);
             if ($c === null) continue;
@@ -1565,6 +1591,18 @@ EOD;
             exit;
         }
 
+        if ($cmd == 'test_terminal') {
+            // Текст из окна проверки — тем же путём, что say()/sayTo() из сценария:
+            // файл в кэше, затем браузерам (событие SANOTTS) или терминалу с TTS
+            // «sanotts». Ответ — что получилось на каждом шаге.
+            while (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/json');
+            if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+            @set_time_limit(0);
+            echo json_encode($this->testDelivery($this->testText(), (string)gr('terminal')), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            exit;
+        }
+
         // --- Свои правила произношения (вкладка «Произношение») ---
         if (in_array($cmd, array('rules_list', 'rule_save', 'rule_delete', 'rule_toggle', 'rule_move', 'stress_delete', 'test_explain'), true)) {
             while (ob_get_level()) ob_end_clean();
@@ -1627,12 +1665,20 @@ EOD;
             $cacheDir = trim((string)gr('cache_dir', $this->config['CACHE_DIR']));
             $this->config['CACHE_DIR'] = $cacheDir !== '' ? $cacheDir : self::defaults()['CACHE_DIR'];
             $this->config['CACHE_CLEANUP'] = gr('cache_cleanup', 0) ? '1' : '0';
+            $this->config['MAIN_SPEAKER'] = gr('main_speaker', 0) ? '1' : '0';
+            $this->config['USE_PLAYER'] = gr('use_player', 0) ? '1' : '0';
+            $base = trim((string)gr('device_base', ''));
+            if ($base === '') {
+                $this->config['DEVICE_BASE'] = '';
+            } else {
+                if (!preg_match('#^https?://#i', $base)) $base = 'http://' . $base;
+                if (preg_match('#^https?://[^/\s?\#]+$#i', rtrim($base, '/'))) $this->config['DEVICE_BASE'] = rtrim($base, '/');
+            }
             // Галочка есть на странице, только когда стоит арабский голос.
             if (gr('tashkeel_shown', 0)) $this->config['TASHKEEL'] = gr('tashkeel', 0) ? '1' : '0';
             $this->config['STREAM'] = gr('stream', 0) ? '1' : '0';
             // Галочка есть на странице, только когда стоит русский голос.
             if (gr('ru_rules_shown', 0)) $this->config['RU_RULES'] = gr('ru_rules', 0) ? '1' : '0';
-            $this->config['WS_PORT'] = gr('ws_port', $this->config['WS_PORT']);
             $this->saveConfig();
             $this->redirect('?action=sanotts&tab=settings');
         }
@@ -1650,10 +1696,14 @@ EOD;
         $out['USE_CACHE'] = $this->config['USE_CACHE'] ? 'checked' : '';
         $out['CACHE_DIR'] = $this->e($this->config['CACHE_DIR']);
         $out['CACHE_CLEANUP'] = $this->config['CACHE_CLEANUP'] ? 'checked' : '';
+        $out['MAIN_SPEAKER'] = (int)$this->config['MAIN_SPEAKER'] ? 'checked' : '';
+        if (!$this->serverPlayers()) $out['MAIN_SPEAKER_NONE'] = 1;
+        $out['USE_PLAYER'] = (int)$this->config['USE_PLAYER'] ? 'checked' : '';
         $out['TASHKEEL'] = (int)$this->config['TASHKEEL'] ? 'checked' : '';
         $out['STREAM'] = (int)$this->config['STREAM'] ? 'checked' : '';
         $out['RU_RULES'] = (int)$this->config['RU_RULES'] ? 'checked' : '';
         $out['WS_PORT'] = $this->e($this->getWsPort());
+        $out['TERMINALS'] = $this->terminalsList();
         $out['VERSION'] = self::VERSION;
 
         $st = $this->statusArray();
@@ -1662,6 +1712,13 @@ EOD;
         $out['MANUAL_INSTALL'] = $this->e(self::manualInstallCommand());
         $out['VOICE_OK'] = $st['voice'] == 'ok' ? '1' : '';
         $out['WS_ALIVE'] = $st['ws'] == 'connected' ? '1' : '';
+        $bad = $this->baseUrlProblem();
+        $out['BASE_URL_WARN'] = $bad !== '' ? sprintf(LANG_SANOTTS_BASE_URL_BAD, '<code>' . $this->e(BASE_URL) . '</code>', $this->e($bad)) : '';
+        $out['DEVICE_BASE'] = $this->e($this->config['DEVICE_BASE']);
+        $out['DEVICE_BASE_AUTO'] = $this->e($this->deviceBaseAuto());
+        $hookHint = $this->playerHookHint();
+        $out['HOOK_WARN'] = $hookHint !== '' ? '1' : '';
+        $out['HOOK_HINT'] = $hookHint;
 
         $tab = gr('tab');
         if (!in_array($tab, array('settings', 'models', 'rules', 'help'), true)) $tab = 'settings';
@@ -1719,9 +1776,12 @@ EOD;
             $c = strcmp($all[$a]['language'], $all[$b]['language']);
             return $c ?: strcmp($a, $b);
         });
+        $sp = @json_decode((string)@file_get_contents($this->config['BASE'] . '/speed.json'), true);
+        self::$deviceSpeed = is_array($sp) && isset($sp['irina']) ? (float)$sp['irina'] : 0.0;
+        self::$speedVoice = is_array($sp) && isset($sp['voice']) ? (string)$sp['voice'] : 'irina';
         $rows = array();
         foreach ($all as $name => $info) {
-            list($desc, $quality) = self::voiceDescription($info);
+            list($desc, $quality) = self::voiceDescription($info, $name);
             $size = isset($installed[$name]) ? $installed[$name]['size'] : $info['size'];
             $rows[] = array(
                 'VOICE' => $this->e($name),
@@ -1732,6 +1792,7 @@ EOD;
                 'SIZE' => $this->e(self::num($size / 1048576, 1) . ' ' . LANG_SANOTTS_MB),
                 'INSTALLED' => isset($installed[$name]) ? '1' : '0',
                 'CUSTOM' => isset($bundled[$name]) ? '0' : '1',
+                'CURRENT' => $name === $this->config['VOICE'] ? '1' : '',
             );
         }
         $out['AVAILABLE_MODELS'] = $rows;
@@ -1759,6 +1820,138 @@ EOD;
     }
 
     /** Команды вкладки «Произношение» (AJAX, JSON). */
+    /**
+     * say()/sayTo() передают событие модулям не напрямую, а фоновым HTTP-запросом
+     * к самому MajorDoMo по BASE_URL (processSubscriptionsSafe → BASE_URL/objects/).
+     * Если BASE_URL не отвечает (не тот порт: веб-сервер на 8080, а в config.php :80),
+     * модуль о фразе не узнаёт — и файла нет. Возвращает '' или текст ошибки.
+     */
+    private function baseUrlProblem()
+    {
+        if (!defined('BASE_URL') || !function_exists('curl_init')) return '';
+        $url = rtrim(BASE_URL, '/') . (defined('ROOTHTML') ? ROOTHTML : '/') . 'templates/sanotts/js/sanotts.js';
+        $ch = curl_init($url);
+        curl_setopt_array($ch, array(
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_NOBODY => true, CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_TIMEOUT => 3, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_SSL_VERIFYHOST => 0,
+        ));
+        curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        if ($code >= 200 && $code < 400) return '';
+        return $code ? 'HTTP ' . $code : ($err !== '' ? $err : 'нет ответа');
+    }
+
+    /** Терминалы для списка «Куда» у кнопки «Отправить». */
+    private function terminalsList()
+    {
+        $list = array();
+        try {
+            $rows = SQLSelect("SELECT NAME, TITLE, TTS_TYPE, CANTTS FROM terminals ORDER BY TITLE");
+        } catch (Throwable $e) {
+            $rows = array();
+        }
+        foreach ((array)$rows as $r) {
+            $title = $r['TITLE'] !== '' ? $r['TITLE'] : $r['NAME'];
+            $tts = (int)$r['CANTTS'] && $r['TTS_TYPE'] !== '' ? $r['TTS_TYPE'] : LANG_SANOTTS_SEND_NO_TTS;
+            // Отправка — только на терминалы с TTS sanotts; остальные видны, но неактивны.
+            $ours = (int)$r['CANTTS'] && $r['TTS_TYPE'] === 'sanotts';
+            $list[] = array('VALUE' => $this->e($r['NAME']), 'TITLE' => $this->e($title . ' (' . $tts . ')'),
+                'DISABLED' => $ours ? '' : 'disabled');
+        }
+        return $list;
+    }
+
+    /**
+     * «Отправить»: синтез в кэш и доставка, как у say()/sayTo().
+     * $terminal === '' — во все открытые браузеры (событие SANOTTS).
+     */
+    private function testDelivery($text, $terminal)
+    {
+        $res = array('ok' => false, 'steps' => array());
+
+        // Сначала — всё, что можно проверить без синтеза.
+        $rec = null;
+        if ($terminal !== '') {
+            $bad = $this->baseUrlProblem();
+            if ($bad !== '') {
+                $res['error'] = sprintf(LANG_SANOTTS_BASE_URL_BAD, '<code>' . $this->e(BASE_URL) . '</code>', $this->e($bad));
+                $res['error_html'] = true;
+                return $res;
+            }
+            $rec = getTerminalsByName($terminal, 1);
+            $rec = $rec ? $rec[0] : null;
+            if (!$rec || !$rec['ID']) {
+                $res['error'] = LANG_SANOTTS_SEND_NO_TERMINAL . ': ' . $terminal;
+                return $res;
+            }
+            $title = $rec['TITLE'] !== '' ? $rec['TITLE'] : $rec['NAME'];
+            if (!(int)$rec['CANTTS'] || $rec['TTS_TYPE'] !== 'sanotts') {
+                $res['error'] = LANG_SANOTTS_SEND_ONLY;
+                return $res;
+            }
+        }
+
+        $t0 = microtime(true);
+        $file = $this->renderToCache($text);
+        if ($file === null) {
+            $res['error'] = LANG_SANOTTS_SEND_NO_FILE . ($this->lastError !== '' ? ': ' . $this->lastError : '');
+            return $res;
+        }
+        $dt = microtime(true) - $t0;
+        $res['steps'][] = sprintf(LANG_SANOTTS_SEND_FILE, $file, round(filesize($file) / 1024),
+            $dt < 0.05 ? LANG_SANOTTS_SEND_CACHED : sprintf(LANG_SANOTTS_SEND_SECONDS, $dt));
+        $url = $this->webUrl($file);
+
+        if ($rec === null) {
+            $ok = postToWebSocket('SANOTTS', array('COMMAND' => 'PlayAudio', 'URL' => $url), 'PostEvent');
+            $this->log('test send to browsers: postToWebSocket ' . ($ok === false ? 'failed' : 'ok') . " url=$url");
+            if ($ok === false) {
+                $res['error'] = sprintf(LANG_SANOTTS_SEND_WS_FAIL, $this->getWsPort());
+                return $res;
+            }
+            $res['steps'][] = sprintf(LANG_SANOTTS_SEND_WS_OK, $url);
+            $res['ok'] = true;
+            return $res;
+        }
+
+        // Терминал с TTS «sanotts»: плеер терминала, MAIN — динамик сервера, остальные —
+        // вкладки браузера, открытые как этот терминал. Сразу, без «Терминалов», чтобы
+        // показать результат.
+        $tts = clone $this;
+        $tts->terminal = $rec;
+        if ($tts->terminalIsMain()) {
+            if (!$tts->terminalPlayFile($file)) {
+                $res['error'] = $this->serverPlayers() ? LANG_SANOTTS_SEND_SPEAKER_FAIL : LANG_SANOTTS_SEND_NO_PLAYER;
+                return $res;
+            }
+            $res['steps'][] = LANG_SANOTTS_SEND_SPEAKER_OK;
+            $res['ok'] = true;
+            return $res;
+        }
+        if (($ptype = $tts->terminalPlayer()) !== '') {
+            $purl = $tts->playerPlayFile($file);
+            if ($purl === null) {
+                $res['error'] = LANG_SANOTTS_SEND_PLAYER_FAIL;
+                return $res;
+            }
+            $res['steps'][] = sprintf(LANG_SANOTTS_SEND_PLAYER_OK, $title, $ptype, $purl);
+            $res['ok'] = true;
+            return $res;
+        }
+        $url = $this->browserPostFile($file, $rec['NAME']);
+        if ($url === null) {
+            $res['error'] = sprintf(LANG_SANOTTS_SEND_WS_FAIL, $this->getWsPort());
+            return $res;
+        }
+        $seen = (string)$rec['LATEST_ACTIVITY'];
+        $res['steps'][] = sprintf(LANG_SANOTTS_SEND_TABS_OK, $title, $rec['NAME'], $seen !== '' ? $seen : '—');
+        if ($seen === '' || strtotime($seen) < time() - 3600) $res['warn'] = sprintf(LANG_SANOTTS_SEND_TABS_STALE, $title);
+        $res['ok'] = true;
+        return $res;
+    }
+
     private function rulesCommand($cmd)
     {
         if ($cmd == 'test_explain') {
@@ -2040,15 +2233,18 @@ EOD;
         $clean = $this->textForSynthesis($message);
         if (trim($clean) === '') return;
 
-        CreateDir(dirname($path));
         $raw = $path . '.raw.wav';
         if (!$this->engineSynthesize($clean, $raw)) {
             @unlink($raw);
-            $this->log("synthesis failed for: $path");
+            $this->log("synthesis failed for $path: " . $this->lastError);
             return;
         }
 
-        rename($raw, $path);
+        if (!@rename($raw, $path)) {
+            @unlink($raw);
+            $this->lastError = 'не удалось записать ' . $path;
+            $this->log($this->lastError);
+        }
     }
 
     /**
@@ -2313,6 +2509,18 @@ EOD;
      * Синтез фразы в файл кэша (или взятие готового). Используется и событием
      * SAY, и аддоном terminals. Возвращает путь к WAV или null.
      */
+    /** « (процесс: пользователь www-data, PHP cli)» — для сообщений о правах. */
+    private static function whoAmI()
+    {
+        $user = '';
+        if (function_exists('posix_geteuid') && function_exists('posix_getpwuid')) {
+            $pw = @posix_getpwuid(posix_geteuid());
+            $user = is_array($pw) ? $pw['name'] : (string)posix_geteuid();
+        }
+        if ($user === '') $user = (string)@get_current_user();
+        return ' (процесс: пользователь ' . $user . ', PHP ' . PHP_SAPI . ')';
+    }
+
     public function renderToCache($message)
     {
         if (empty($this->config)) $this->getConfig();
@@ -2320,7 +2528,17 @@ EOD;
         $useCache = (int)$this->config['USE_CACHE'] === 1;
         $wavFile = $cacheDir . '/sanotts_' . md5($this->getCacheKey($message)) . '.wav';
 
-        CreateDir($cacheDir);
+        // Вложенно: cms/cached может ещё не быть (CreateDir ядра создаёт один уровень).
+        if (!is_dir($cacheDir) && !@mkdir($cacheDir, 0777, true) && !is_dir($cacheDir)) {
+            $this->lastError = 'не удалось создать каталог кэша ' . $cacheDir . self::whoAmI();
+            $this->log($this->lastError);
+            return null;
+        }
+        if (!is_writable($cacheDir)) {
+            $this->lastError = 'нет прав на запись в каталог кэша ' . $cacheDir . self::whoAmI();
+            $this->log($this->lastError);
+            return null;
+        }
 
         if (!$useCache || !file_exists($wavFile)) {
             $this->synthesizeToFile($message, $wavFile);
@@ -2337,9 +2555,136 @@ EOD;
     // те же методы, что у tts_addon — say(), ask(), sayCached()
     // ------------------------------------------------------------------
 
+    /**
+     * Играть ли динамиком сервера: только терминал MAIN (сам сервер) и только с
+     * галочкой «Терминал MAIN — динамиком сервера»; без неё MAIN, как и любой
+     * другой терминал, звучит во вкладках браузера, открытых как этот терминал.
+     */
+    private function terminalIsMain()
+    {
+        if (empty($this->config)) $this->getConfig();
+        $main = !is_array($this->terminal) || !isset($this->terminal['NAME']) ||
+            strtoupper((string)$this->terminal['NAME']) === 'MAIN';
+        return $main && (int)$this->config['MAIN_SPEAKER'] === 1;
+    }
+
+    /**
+     * Программы, которыми сервер может играть звук сам (Windows — встроенный
+     * проигрыватель). Пусто — проигрывателя в PATH нет.
+     */
+    /** Свой проигрыватель sanotts_play (Android) — путь или ''. */
+    private function ownPlayer()
+    {
+        if (!SanottsEngine::isAndroid()) return '';
+        if (empty($this->config)) $this->getConfig();
+        $f = SanottsEngine::binDir(SanottsEngine::trimDir($this->config['BASE'])) . '/' . SanottsEngine::playerName();
+        return is_file($f) ? $f : '';
+    }
+
+    private function serverPlayers()
+    {
+        static $found = null;
+        if ($found !== null) return $found;
+        if (SanottsEngine::isWindows()) return $found = array('powershell');
+        $found = array();
+        if ($this->ownPlayer() !== '') $found[] = SanottsEngine::playerName();
+        foreach (array('play-audio', 'paplay', 'aplay', 'ffplay') as $cmd) {
+            if (SanottsEngine::haveTool($cmd)) $found[] = $cmd;
+        }
+        return $found;
+    }
+
+    private function terminalName()
+    {
+        return is_array($this->terminal) && isset($this->terminal['NAME']) ? (string)$this->terminal['NAME'] : '';
+    }
+
+    /** Плеер терминала (тип плеера в карточке терминала и «может проигрывать»), если включено «играть плеером». */
+    private function terminalPlayer()
+    {
+        if (empty($this->config)) $this->getConfig();
+        if (!(int)$this->config['USE_PLAYER'] || !is_array($this->terminal)) return '';
+        $t = $this->terminal;
+        if (empty($t['PLAYER_TYPE']) || empty($t['CANPLAY'])) return '';
+        return (string)$t['PLAYER_TYPE'];
+    }
+
+    /** Адрес сервера для ссылки плееру: из настроек, а если пусто — автоматически. */
+    private function deviceBase()
+    {
+        $b = trim((string)$this->config['DEVICE_BASE']);
+        return $b !== '' ? rtrim($b, '/') : $this->deviceBaseAuto();
+    }
+
+    /**
+     * Автоматически: http://<IP сервера в домашней сети>[:порт из BASE_URL].
+     * IP — среди адресов всех сетевых интерфейсов и getLocalIp(): сначала
+     * 192.168.*, потом 172.16–31.*, потом 10.*; 127.*, 169.254.* и 100.64/10
+     * (мобильный оператор, Tailscale) — только если других нет.
+     */
+    private function deviceBaseAuto()
+    {
+        $ips = array();
+        if (function_exists('net_get_interfaces')) {
+            foreach ((array)@net_get_interfaces() as $if) {
+                foreach ((array)(isset($if['unicast']) ? $if['unicast'] : array()) as $u) {
+                    if (!empty($u['address']) && filter_var($u['address'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) $ips[] = $u['address'];
+                }
+            }
+        }
+        if (function_exists('getLocalIp')) $ips[] = (string)getLocalIp();
+        if (!empty($_SERVER['SERVER_ADDR'])) $ips[] = (string)$_SERVER['SERVER_ADDR'];
+        $best = '';
+        $bestRank = 99;
+        foreach (array_unique($ips) as $ip) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) continue;
+            $o = array_map('intval', explode('.', $ip));
+            if ($o[0] == 192 && $o[1] == 168) $rank = 1;
+            elseif ($o[0] == 172 && $o[1] >= 16 && $o[1] <= 31) $rank = 2;
+            elseif ($o[0] == 10) $rank = 3;
+            elseif ($o[0] == 127 || ($o[0] == 169 && $o[1] == 254)) $rank = 9;
+            elseif ($o[0] == 100 && $o[1] >= 64 && $o[1] <= 127) $rank = 5;
+            else $rank = 4;
+            if ($rank < $bestRank) { $best = $ip; $bestRank = $rank; }
+        }
+        if ($best === '') $best = '127.0.0.1';
+        $port = '';
+        if (defined('BASE_URL') && stripos(BASE_URL, 'http://') === 0) {
+            $p = parse_url(BASE_URL, PHP_URL_PORT);
+            if ($p && $p != 80) $port = ':' . $p;
+        }
+        return 'http://' . $best . $port;
+    }
+
+    /** Отдать файл плееру терминала (app_player через playMedia ядра). */
+    private function playerPlayFile($file)
+    {
+        $path = str_replace('\\', '/', $file);
+        $root = defined('ROOT') ? str_replace('\\', '/', SanottsEngine::trimDir(ROOT)) : '';
+        if ($root === '' || stripos($path, $root . '/') !== 0) {
+            $this->log("player: file outside the site, not reachable by URL: $file");
+            return null;
+        }
+        $url = $this->deviceBase() . $this->webUrl($file);
+        $name = $this->terminalName();
+        playMedia($url, $name);
+        $this->log("player {$this->terminal['PLAYER_TYPE']} of terminal $name: $url");
+        return $url;
+    }
+
     public function say($phrase, $level = 0)
     {
-        return $this->terminalPlayPhrase($phrase);
+        if (empty($this->config)) $this->getConfig();
+        // MAIN с галочкой «играть динамиком сервера» — только динамик, даже если у него есть плеер.
+        if ($this->terminalIsMain()) return $this->terminalPlayPhrase($phrase);
+        if ($this->terminalPlayer() !== '') {
+            $file = $this->renderToCache($phrase);
+            return $file !== null && $this->playerPlayFile($file) !== null;
+        }
+        // Вкладки, открытые как этот терминал: общую рассылку SAY они пропускают,
+        // поэтому фраза приходит им только отсюда — с порогом уровня этого терминала,
+        // который проверили «Терминалы».
+        return $this->browserDeliver($phrase, $this->terminalName()) !== null;
     }
 
     public function ask($phrase, $level = 0)
@@ -2347,10 +2692,23 @@ EOD;
         return $this->say($phrase, $level);
     }
 
+    /**
+     * «Терминалы» зовут sayCached(), когда другой TTS-модуль (piper_tts и т. п.)
+     * опубликовал SAY_CACHED_READY со своим файлом. Терминал с TTS «sanotts» эту
+     * фразу и так получает через say() — нашим голосом; чужой файл не играем,
+     * иначе она прозвучала бы дважды разными голосами. Свой файл из кэша — играем.
+     */
     public function sayCached($phrase, $level = 0, $cached_file = '')
     {
-        if ($cached_file !== '' && file_exists($cached_file) && $this->terminalPlayFile($cached_file)) return true;
-        return $this->terminalPlayPhrase($phrase);
+        if (empty($this->config)) $this->getConfig();
+        if ($cached_file === '' || !file_exists($cached_file)) return $this->say($phrase, $level);
+        $own = strpos(basename($cached_file), 'sanotts_') === 0 &&
+            str_replace('\\', '/', realpath(dirname($cached_file))) === str_replace('\\', '/', (string)realpath($this->config['CACHE_DIR']));
+        if (!$own) return true;
+        // Файл уже есть — играем его; не вышло — повторный синтез той же фразы не поможет.
+        if ($this->terminalIsMain()) return $this->terminalPlayFile($cached_file);
+        if ($this->terminalPlayer() !== '') return $this->playerPlayFile($cached_file) !== null;
+        return $this->browserPostFile($cached_file, $this->terminalName()) !== null;
     }
 
     private function terminalPlayPhrase($phrase)
@@ -2379,13 +2737,30 @@ EOD;
             'ffplay'     => array('ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', $file),
             'play-audio' => array('play-audio', $file),   // Termux: pkg install play-audio
         );
+        // Android: свой sanotts_play (системные AAudio / OpenSL ES, канал «Ассистент»),
+        // за ним play-audio. paplay в Termux часто есть (пакет pulseaudio), но без
+        // запущенного сервера PulseAudio молча не играет.
+        if (SanottsEngine::isAndroid()) {
+            $players = array('play-audio' => $players['play-audio']) + $players;
+            if (($own = $this->ownPlayer()) !== '') {
+                $players = array(SanottsEngine::playerName() => array($own, $file)) + $players;
+                $have[SanottsEngine::playerName()] = true;
+            }
+        }
+        $tried = array();
         foreach ($players as $cmd => $args) {
             if (!isset($have[$cmd])) $have[$cmd] = SanottsEngine::haveTool($cmd);
             if (!$have[$cmd]) continue;
-            SanottsEngine::run($args);
-            return true;
+            list($ok, $rc, $err) = SanottsEngine::run($args);
+            if ($ok && $rc === 0) {
+                $this->log("terminal: played with $cmd: $file");
+                return true;
+            }
+            // Не сработал — следующий; в журнал — почему (сервер звука не запущен и т. п.).
+            $tried[] = $cmd;
+            $this->log("terminal: $cmd failed (code $rc)" . ($err !== '' ? ': ' . mb_substr($err, 0, 300) : ''));
         }
-        $this->log('terminal: no audio player (paplay, aplay, ffplay, play-audio)');
+        if (!$tried) $this->log('terminal: no audio player found (paplay, aplay, ffplay, play-audio' . (SanottsEngine::isAndroid() ? ', sanotts_play — reinstall the engine' : '') . ') — install one or turn off "Terminal MAIN: play on the server speaker"');
         return false;
     }
 
@@ -2403,18 +2778,51 @@ EOD;
 
         $destination = isset($details['destination']) ? $details['destination'] : '';
 
-        // В браузер — по предложениям: первое звучит, пока синтезируются следующие
-        // (плеер sanotts.js ставит их в очередь). Терминалам (SAYTO) нужен один файл.
-        if (!($event == 'SAYTO' && $destination !== '') && (int)$this->config['STREAM']) {
+        // sayTo() на терминал: с TTS «sanotts» его озвучивают «Терминалы» — вызовом
+        // say() этого модуля (плеер терминала, вкладки или динамик сервера MAIN);
+        // терминал с другим типом TTS озвучивает его собственный TTS. Здесь — ничего.
+        if ($event == 'SAYTO' && $destination !== '') return;
+
+        // say() — вкладкам без терминала (обычные страницы MajorDoMo). У них нет своего
+        // порога, поэтому — общий minMsgLevel, как у терминалов без своего порога.
+        // Вкладки терминалов эту рассылку пропускают (sanotts.js) и получают фразу через
+        // «Терминалы» — с порогом своего терминала.
+        $level = isset($details['level']) ? (int)$details['level'] : (isset($details['IMPORTANCE']) ? (int)$details['IMPORTANCE'] : 0);
+        $min = (int)getGlobal('ThisComputer.minMsgLevel');
+        if ($level < $min) {
+            $this->log("SAY level $level < minMsgLevel $min — browser tabs skipped");
+            return;
+        }
+        $this->browserDeliver($message);
+    }
+
+    /**
+     * В браузеры — событием SANOTTS через WebSocket. $terminal — имя терминала:
+     * играют только вкладки, открытые как этот терминал (?terminal=… или по IP
+     * из поля «Хост»); '' — все вкладки. С «по предложениям» — первое звучит,
+     * пока синтезируются следующие (плеер sanotts.js ставит их в очередь).
+     * Возвращает ссылку на файл (первый, если по предложениям) или null.
+     */
+    private function browserDeliver($message, $terminal = '')
+    {
+        $value = function ($url) use ($terminal) {
+            $v = array('COMMAND' => 'PlayAudio', 'URL' => $url);
+            if ($terminal !== '') $v['TERMINAL'] = $terminal;
+            return $v;
+        };
+        $to = $terminal !== '' ? " terminal=$terminal" : '';
+        if ((int)$this->config['STREAM']) {
             $sentences = $this->splitForStream($this->textForSynthesis($message));
             if (count($sentences) > 1) {
                 $t0 = microtime(true);
                 $self = $this;
-                $post = function ($i, $wav) use ($self, $t0, $sentences) {
+                $first = null;
+                $post = function ($i, $wav) use ($self, $t0, $sentences, $value, $to, &$first) {
                     if ($wav === null) { $self->logPublic("sentence $i skipped: " . $sentences[$i]); return; }
                     $url = $self->webUrlPublic($wav);
-                    $result = postToWebSocket('SANOTTS', array('COMMAND' => 'PlayAudio', 'URL' => $url), 'PostEvent');
-                    if ($i == 0) $self->logPublic(sprintf('first sentence ready in %.2f s', microtime(true) - $t0));
+                    if ($first === null) $first = $url;
+                    $result = postToWebSocket('SANOTTS', $value($url), 'PostEvent');
+                    if ($i == 0) $self->logPublic(sprintf('first sentence ready in %.2f s', microtime(true) - $t0) . $to);
                     if ($result === false) $self->logPublic("postToWebSocket failed url=$url");
                 };
                 // Один запуск движка на всё сообщение; без proc_open — по предложению за запуск.
@@ -2422,32 +2830,25 @@ EOD;
                     foreach ($sentences as $i => $sentence) $post($i, $this->renderSentence($sentence, $i == 0));
                 }
                 if ((int)$this->config['CACHE_CLEANUP'] === 1) $this->cleanupCache();
-                return;
+                return $first;
             }
         }
-
         $wavFile = $this->renderToCache($message);
         if ($wavFile === null) {
-            $this->log('wav not found after synthesis');
-            return;
+            $this->log('wav not found after synthesis: ' . $this->lastError);
+            return null;
         }
+        return $this->browserPostFile($wavFile, $terminal);
+    }
+
+    private function browserPostFile($wavFile, $terminal = '')
+    {
         $url = $this->webUrl($wavFile);
-
-        if ($event == 'SAYTO' && $destination !== '') {
-            $level = isset($details['level']) ? $details['level'] : (isset($details['IMPORTANCE']) ? $details['IMPORTANCE'] : 0);
-            processSubscriptionsSafe('SAY_CACHED_READY', array(
-                'level'       => $level,
-                'filename'    => $wavFile,
-                'event'       => 'SAYTO',
-                'destination' => $destination,
-                'message'     => $message,
-            ));
-            $this->log("SAY_CACHED_READY dest=$destination url=$url");
-            return;
-        }
-
-        $result = postToWebSocket('SANOTTS', array('COMMAND' => 'PlayAudio', 'URL' => $url), 'PostEvent');
-        $this->log('postToWebSocket result=' . ($result === false ? 'false' : 'ok') . " url=$url");
+        $v = array('COMMAND' => 'PlayAudio', 'URL' => $url);
+        if ($terminal !== '') $v['TERMINAL'] = $terminal;
+        $result = postToWebSocket('SANOTTS', $v, 'PostEvent');
+        $this->log('postToWebSocket result=' . ($result === false ? 'false' : 'ok') . " url=$url" . ($terminal !== '' ? " terminal=$terminal" : ''));
+        return $result === false ? null : $url;
     }
 
     private function cleanupCache()
@@ -2458,6 +2859,207 @@ EOD;
         foreach ((array)glob($dir . '/sanotts_*.wav') as $f) {
             if ($now - @filemtime($f) > 864000) @unlink($f); // 10 дней
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Подключение плеера к страницам (auto_prepend_file)
+    // ------------------------------------------------------------------
+
+    const HOOK_BEGIN = '# sanotts: begin';
+    const HOOK_END = '# sanotts: end';
+    const INI_MARK = '; sanotts';
+
+    /**
+     * Свой загрузчик для auto_prepend_file — cms/sanotts/prepend_loader.php.
+     * Делает то же, что общий modules/prepend.php (подключает prepend.php
+     * активных модулей), но лежит в каталоге движка: его не удалят ни маркет,
+     * ни piper_tts/vosk при своём удалении, и .user.ini/.htaccess не останутся
+     * указывающими на пропавший файл (иначе — «Failed opening required» на
+     * каждой странице). Каталог cms/sanotts остаётся и после удаления модуля.
+     */
+    public static function ownLoaderPath()
+    {
+        return str_replace('\\', '/', self::defaultBase()) . '/prepend_loader.php';
+    }
+
+    private static function writeOwnLoader()
+    {
+        $path = self::ownLoaderPath();
+        $root = str_replace('\\', '/', SanottsEngine::trimDir(ROOT)) . '/';
+        $code = "<?php\n"
+            . "// Загрузчик плеера sanoTTS для auto_prepend_file (.user.ini / .htaccess).\n"
+            . "// Подключает prepend.php активных модулей MajorDoMo, как modules/prepend.php.\n"
+            . "if (PHP_SAPI === 'cli') return;\n"
+            . '$root = ' . var_export($root, true) . ";\n"
+            . 'if (!is_file($root . \'config.php\')) return;' . "\n"
+            . 'include_once $root . \'config.php\';' . "\n"
+            . "if (!defined('DB_HOST') || !function_exists('mysqli_connect')) return;\n"
+            . '$link = null;' . "\n"
+            . "try {\n"
+            . '    $link = @mysqli_connect(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);' . "\n"
+            . '    if (!$link) return;' . "\n"
+            . '    $result = mysqli_query($link, "SELECT NAME FROM project_modules WHERE HIDDEN=0");' . "\n"
+            . '    if (!$result) return;' . "\n"
+            . '    while ($row = mysqli_fetch_assoc($result)) {' . "\n"
+            . '        if (!preg_match(\'/^\\w+$/\', $row[\'NAME\'])) continue;' . "\n"
+            . '        $prepend = $root . \'modules/\' . $row[\'NAME\'] . \'/prepend.php\';' . "\n"
+            . '        if (is_file($prepend)) include_once $prepend;' . "\n"
+            . "    }\n"
+            . "} catch (Throwable \$e) {\n"
+            . "    return;\n"
+            . "} finally {\n"
+            . '    if ($link instanceof mysqli) @mysqli_close($link);' . "\n"
+            . "}\n";
+        if (!is_dir(dirname($path))) @mkdir(dirname($path), 0777, true);
+        if ((string)@file_get_contents($path) !== $code && @file_put_contents($path, $code) === false) {
+            if (function_exists('DebMes')) DebMes('install: cannot write ' . $path, 'sanotts');
+        }
+        return $path;
+    }
+
+    /**
+     * auto_prepend_file задаётся двумя способами сразу — каждый действует
+     * только там, где нужен, и безвреден в остальных случаях:
+     *  - .htaccess, php_value внутри <IfModule mod_php…> — Apache с PHP-модулем
+     *    (mod_php); без mod_php блок пропускается (голая php_value там дала бы
+     *    ошибку 500 на весь сайт);
+     *  - .user.ini — PHP в режиме CGI/FastCGI (php-fpm, php-cgi: nginx,
+     *    lighttpd, Termux, KSWEB, Docker); mod_php его не читает.
+     */
+    /** Путь auto_prepend_file — наш: свой загрузчик или общий modules/prepend.php (тоже подключает модули). */
+    private static function isOurPrepend($p)
+    {
+        return (bool)preg_match('#(modules/prepend\.php|/prepend_loader\.php)$#', str_replace('\\', '/', trim((string)$p)));
+    }
+
+    /**
+     * Посторонний auto_prepend_file, уже действующий в этом (веб-)запросе: задан
+     * в php.ini или конфигурации сервера. Своей строкой в .user.ini/.htaccess
+     * модуль его перекрыл бы, и тот файл перестал бы подключаться, — поэтому
+     * тогда ничего не пишем. '' — нет такого (или установка идёт из консоли,
+     * где настройки веб-сервера не видны).
+     */
+    private static function foreignPrepend()
+    {
+        if (PHP_SAPI === 'cli') return '';
+        $cur = trim((string)ini_get('auto_prepend_file'));
+        return $cur !== '' && !self::isOurPrepend($cur) ? $cur : '';
+    }
+
+    private function installPrependHooks($loaderPath)
+    {
+        $loader = str_replace('\\', '/', $loaderPath);
+        $foreign = self::foreignPrepend();
+        if ($foreign !== '') {
+            $this->log('install: auto_prepend_file is already ' . $foreign . ' — .htaccess and .user.ini left as is');
+            return;
+        }
+
+        $ht = ROOT . '.htaccess';
+        if (file_exists($ht)) {
+            $c = (string)file_get_contents($ht);
+            // Свой блок — пересобираем (путь к загрузчику мог смениться).
+            $c = preg_replace('/' . preg_quote(self::HOOK_BEGIN, '/') . '.*?' . preg_quote(self::HOOK_END, '/') . '\R?/s', '', $c);
+            // Любая другая php_value auto_prepend_file (piper_tts, vosk, своя) уже
+            // задаёт загрузчик — её не трогаем и свою не добавляем.
+            $plain = preg_match('/^\s*php_value\s+auto_prepend_file\s/mi', $c);
+            $block = self::HOOK_BEGIN . "\n";
+            if (!$plain) {
+                foreach (array('mod_php.c', 'mod_php7.c') as $m) {
+                    $block .= "<IfModule $m>\nphp_value auto_prepend_file \"$loader\"\n</IfModule>\n";
+                }
+            }
+            $block .= "<Files \".user.ini\">\ndeny from all\n</Files>\n" . self::HOOK_END . "\n";
+            file_put_contents($ht, $block . $c);
+            $this->log('install: auto_prepend_file block in .htaccess -> ' . ($plain ? '(existing php_value kept)' : $loader));
+        }
+
+        $ini = ROOT . '.user.ini';
+        $c = file_exists($ini) ? (string)file_get_contents($ini) : '';
+        if (preg_match('/^\s*auto_prepend_file\s*=\s*"?([^"\r\n]*)/mi', $c, $m)) {
+            // Строку переписываем, только если её записал этот модуль (метка «; sanotts»
+            // строкой выше): прежние версии писали общий modules/prepend.php. Чужую или
+            // вписанную вручную — не трогаем, даже если она указывает на modules/prepend.php
+            // (он тоже подключает плеер).
+            $markRe = '/^' . preg_quote(self::INI_MARK, '/') . '\R\s*auto_prepend_file\s*=\s*"?([^"\r\n]*)"?[^\r\n]*/m';
+            if (preg_match($markRe, $c, $mm)) {
+                if (str_replace('\\', '/', trim($mm[1])) !== $loader) {
+                    $c = preg_replace($markRe, self::INI_MARK . "\nauto_prepend_file = \"" . $loader . '"', $c, 1);
+                    @file_put_contents($ini, $c);
+                    $this->log('install: .user.ini auto_prepend_file -> ' . $loader);
+                }
+            } else {
+                $this->log('install: .user.ini already sets auto_prepend_file=' . trim($m[1]) . ', left as is');
+            }
+            return;
+        }
+        $line = self::INI_MARK . "\nauto_prepend_file = \"$loader\"\n";
+        if ($c !== '' && substr($c, -1) !== "\n") $c .= "\n";
+        if (@file_put_contents($ini, $c . $line) === false) {
+            $this->log('install: cannot write ' . $ini);
+        } else {
+            $this->log('install: auto_prepend_file added to .user.ini');
+        }
+    }
+
+    /** Убрать только то, что записал этот модуль; чужие строки и файлы не трогаем. */
+    private function removePrependHooks($loaderPath)
+    {
+        $ht = ROOT . '.htaccess';
+        if (file_exists($ht)) {
+            $c0 = (string)file_get_contents($ht);
+            $c = preg_replace('/' . preg_quote(self::HOOK_BEGIN, '/') . '.*?' . preg_quote(self::HOOK_END, '/') . '\R?/s', '', $c0);
+            // Строка прежних версий модуля (без обёртки) — ровно в том виде, как они её писали.
+            $line = 'php_value auto_prepend_file ' . $loaderPath;
+            $c = str_replace(array($line . "\r\n", $line . "\n"), '', $c);
+            if ($c !== $c0) file_put_contents($ht, $c);
+        }
+
+        $ini = ROOT . '.user.ini';
+        if (file_exists($ini)) {
+            $c0 = (string)file_get_contents($ini);
+            // Метка и строка сразу под ней; а также строка, указывающая на свой загрузчик.
+            $c = preg_replace('/^' . preg_quote(self::INI_MARK, '/') . '\R\s*auto_prepend_file\s*=[^\r\n]*\R?/m', '', $c0);
+            $c = preg_replace('/^' . preg_quote(self::INI_MARK, '/') . '\R/m', '', $c);
+            $c = preg_replace('/^\s*auto_prepend_file\s*=\s*"?[^"\r\n]*[\/\\\\]prepend_loader\.php"?\s*\R?/mi', '', $c);
+            if ($c !== $c0) {
+                if (trim($c) === '') @unlink($ini);
+                else file_put_contents($ini, $c);
+            }
+        }
+    }
+
+    /**
+     * Подключается ли плеер к страницам: auto_prepend_file в этом (веб-)запросе
+     * указывает на общий загрузчик. Возвращает '' или подсказку (HTML).
+     */
+    private function playerHookHint()
+    {
+        $cur = str_replace('\\', '/', (string)ini_get('auto_prepend_file'));
+        if ($cur !== '' && self::isOurPrepend($cur) && is_file($cur)) return '';
+        $loader = self::ownLoaderPath();
+        if ($cur !== '' && !self::isOurPrepend($cur)) {
+            // Чужой файл, в который уже вписано подключение загрузчика, — всё работает.
+            $body = is_file($cur) ? (string)@file_get_contents($cur, false, null, 0, 65536) : '';
+            if (strpos($body, 'prepend_loader.php') !== false || strpos($body, 'modules/prepend.php') !== false) return '';
+            return sprintf(LANG_SANOTTS_HOOK_OTHER, '<code>' . $this->e($cur) . '</code>') . '<br>' .
+                sprintf(LANG_SANOTTS_HOOK_INCLUDE, '<code style="user-select:all">' . $this->e("include_once '" . $loader . "';") . '</code>');
+        }
+        $sapi = PHP_SAPI;
+        if ($sapi === 'apache2handler') {
+            $hint = LANG_SANOTTS_HOOK_APACHE;
+        } elseif ($sapi === 'cgi-fcgi' || $sapi === 'fpm-fcgi') {
+            $iniFile = ROOT . '.user.ini';
+            $iniOk = is_file($iniFile) && preg_match('#(modules/prepend\.php|/prepend_loader\.php)#', str_replace('\\', '/', (string)@file_get_contents($iniFile)));
+            if (ini_get('user_ini.filename') === '') $hint = LANG_SANOTTS_HOOK_NO_USER_INI;
+            elseif (!$iniOk) $hint = sprintf(LANG_SANOTTS_HOOK_CGI_NOFILE, '<code>' . $this->e(str_replace('\\', '/', $iniFile)) . '</code>');
+            else $hint = sprintf(LANG_SANOTTS_HOOK_CGI, (int)ini_get('user_ini.cache_ttl') ?: 300);
+        } else {
+            $hint = LANG_SANOTTS_HOOK_GENERIC;
+        }
+        return $hint . '<br>' . sprintf(LANG_SANOTTS_HOOK_FIX,
+            '<code style="user-select:all">auto_prepend_file = "' . $this->e($loader) . '"</code>',
+            '<code style="user-select:all">' . $this->e('<script src="/templates/sanotts/js/sanotts.js"></script>') . '</code>');
     }
 
     // ------------------------------------------------------------------
@@ -2523,12 +3125,13 @@ EOD;
     {
         subscribeToEvent($this->name, 'SAY', '', 110);
         subscribeToEvent($this->name, 'SAYTO', '', 110);
-        subscribeToEvent($this->name, 'SAYREPLY', '', 110);
+        // SAYREPLY не нужен: sayReply() сам вызывает sayTo() или say(), а потом шлёт
+        // SAYREPLY — подписка озвучивала ответ второй раз. Снимаем и у прежних версий.
+        unsubscribeFromEvent($this->name, 'SAYREPLY');
 
         // Общий загрузчик modules/prepend.php — тот же, что у piper_tts и vosk:
         // он подключает prepend.php каждого активного модуля.
         $loaderPath = ROOT . 'modules/prepend.php';
-        $htaccessPath = ROOT . '.htaccess';
 
         if (!file_exists($loaderPath)) {
             $loaderContent = <<<'PHP'
@@ -2565,14 +3168,7 @@ PHP;
             $this->log('install: created modules/prepend.php');
         }
 
-        if (file_exists($htaccessPath)) {
-            $htContent = file_get_contents($htaccessPath);
-            if (strpos($htContent, 'modules/prepend.php') === false) {
-                $htContent = 'php_value auto_prepend_file ' . $loaderPath . "\n" . $htContent;
-                file_put_contents($htaccessPath, $htContent);
-                $this->log('install: added auto_prepend_file to .htaccess');
-            }
-        }
+        $this->installPrependHooks(self::writeOwnLoader());
 
         parent::install();
     }
@@ -2583,10 +3179,11 @@ PHP;
         unsubscribeFromEvent($this->name, 'SAYTO');
         unsubscribeFromEvent($this->name, 'SAYREPLY');
 
+        // Строки прежних версий указывали на общий modules/prepend.php — его путь нужен,
+        // чтобы убрать и их (removePrependHooks убирает и строки со своим загрузчиком).
         $loaderPath = ROOT . 'modules/prepend.php';
-        $htaccessPath = ROOT . '.htaccess';
 
-        // Загрузчик общий: снимаем его, только если им больше никто не пользуется.
+        // Загрузчик подключает и плееры piper_tts/vosk: снимаем записи, только если их нет.
         $othersInstalled = false;
         try {
             $res = SQLSelect("SELECT ID FROM project_modules WHERE NAME IN ('vosk','piper_tts') AND HIDDEN=0");
@@ -2595,14 +3192,12 @@ PHP;
             $othersInstalled = true;
         }
 
+        // Сами загрузчики (cms/sanotts/prepend_loader.php, modules/prepend.php) не удаляем:
+        // PHP в режиме FastCGI держит .user.ini в кэше до 5 минут (user_ini.cache_ttl) и всё
+        // это время подключает их — без файла сайт падал бы с «Failed opening required».
+        // Без модулей они ничего не делают. Чужие и вписанные вручную строки не трогаем.
         if (!$othersInstalled) {
-            if (file_exists($htaccessPath)) {
-                $line = 'php_value auto_prepend_file ' . $loaderPath;
-                $htContent = file_get_contents($htaccessPath);
-                $htContent = str_replace(array($line . "\r\n", $line . "\n", $line), '', $htContent);
-                file_put_contents($htaccessPath, preg_replace('/\n{3,}/', "\n\n", $htContent));
-            }
-            if (file_exists($loaderPath)) @unlink($loaderPath);
+            $this->removePrependHooks($loaderPath);
         }
 
         // Свои правила произношения — вместе с модулем (перед удалением их можно

@@ -4,10 +4,38 @@
   #model_table .btn-action { width:92px; padding-left:0; padding-right:0; text-align:center; }
   #model_table tr.voice-main td { border-top:1px solid #ddd; vertical-align:middle; }
   #model_table tr.voice-desc td { border-top:0; padding-top:0; font-size:12px; line-height:1.45; color:#555; }
-  /* Телефон: статус и так виден по кнопке (Удалить / Установить) — колонку прячем. */
+  #model_table .voice-tags { font-size:12px; font-weight:normal; white-space:nowrap; }
+  #model_table .voice-more { display:none; }
+  #model_table .voice-inst { display:none; }
+  #model_table, .sanotts-vfilter { max-width:100%; }
+  fieldset { min-width:0; }
+  .sanotts-vfilter { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; margin:0 0 8px; }
+  .sanotts-vfilter select { width:auto; max-width:100%; display:inline-block; }
+  .sanotts-vfilter label { font-weight:normal; margin:0; cursor:pointer; }
+  .sanotts-vfilter input[type=checkbox] { margin:0 5px 0 0; vertical-align:-2px; }
+  /* Телефон: карточки вместо таблицы — имя, отметки и кнопка в первой строке,
+     язык и размер второй, подробности — по «подробнее». */
   @media (max-width: 767px) {
+    #model_table, #model_table tbody, #model_table tr, #model_table td { display:block; width:auto; }
+    #model_table thead { display:none; }
+    #model_table tbody.voice { border-top:1px solid #ddd; padding:8px 0; }
+    #model_table tr.voice-main { display:flex; flex-wrap:wrap; align-items:center; }
+    #model_table tr.voice-main td { border:0; padding:0; }
+    #model_table td.col-name { order:1; flex:1 1 0; min-width:0; overflow-wrap:anywhere; }
+    #model_table td.col-act { order:2; flex:0 0 auto; margin-left:8px; }
+    /* Перенос: язык и размер — всегда второй строкой. */
+    #model_table tr.voice-main:after { content:""; order:3; flex:0 0 100%; height:0; }
+    #model_table td.col-lang, #model_table td.col-size { font-size:12px; color:#555; margin-top:2px; }
+    #model_table td.col-lang { order:4; flex:0 1 auto; min-width:0; }
+    #model_table td.col-size { order:5; flex:0 0 auto; }
+    #model_table .voice-inst { display:inline; }
+    #model_table td.col-size:before { content:"\00a0\00b7\00a0"; }
     #model_table .col-status { display:none; }
-    #model_table td, #model_table th { padding-left:4px; padding-right:4px; }
+    #model_table tr.voice-desc td { padding:4px 0 0; overflow-wrap:anywhere; }
+    #model_table .voice-desc-body { display:none; }
+    #model_table tbody.open .voice-desc-body { display:block; margin-top:4px; }
+    #model_table .voice-more { display:inline; font-size:12px; }
+    #model_table .btn-action { width:84px; }
   }
 </style>
 <fieldset>
@@ -15,6 +43,11 @@
 [#if NO_VOICES="1"#]
   <div class="alert alert-warning"><#LANG_SANOTTS_NO_VOICES#></div>
 [#endif#]
+  <div class="sanotts-vfilter">
+    <select id="sanotts_vlang" class="form-control input-sm" onchange="sanottsVoiceFilter()"><option value=""><#LANG_SANOTTS_ALL_LANGUAGES#></option></select>
+    <label><input type="checkbox" id="sanotts_vinst" onchange="sanottsVoiceFilter()"><#LANG_SANOTTS_ONLY_INSTALLED#></label>
+    <span id="sanotts_vcount" class="text-muted" style="font-size:12px"></span>
+  </div>
   <table class="table" id="model_table">
     <thead>
       <tr>
@@ -25,14 +58,14 @@
         <th></th>
       </tr>
     </thead>
-    <tbody>
 [#begin AVAILABLE_MODELS#]
+    <tbody class="voice" data-lang="[#LANGUAGE#]" data-installed="[#INSTALLED#]" data-current="[#CURRENT#]">
       <tr class="voice-main">
-       <td><b>[#VOICE#]</b></td>
-       <td>[#LANGUAGE#]</td>
-       <td style="white-space:nowrap">[#SIZE#]</td>
+       <td class="col-name"><b>[#VOICE#]</b>[#if CURRENT="1"#] <span class="voice-tags text-primary" title="<#LANG_SANOTTS_VOICE_CURRENT#>">&#9733; <#LANG_SANOTTS_VOICE_CURRENT#></span>[#else#][#if INSTALLED="1"#] <span class="voice-tags voice-inst text-success">&#10004; <#LANG_SANOTTS_INSTALLED_TRUE#></span>[#endif#][#endif#]</td>
+       <td class="col-lang">[#LANGUAGE#]</td>
+       <td class="col-size" style="white-space:nowrap">[#SIZE#]</td>
        <td class="col-status">[#if CUSTOM="1"#]<span class="label label-info label-status"><#LANG_SANOTTS_CUSTOM#></span> [#else#][#if INSTALLED="1"#]<span class="label label-success label-status"><#LANG_SANOTTS_INSTALLED_TRUE#></span>[#else#]<span class="label label-default label-status"><#LANG_SANOTTS_INSTALLED_FALSE#></span>[#endif#][#endif#]</td>
-       <td>
+       <td class="col-act">
 [#if INSTALLED="1"#]
         <a href="?action=sanotts&cmd=delete_model&tab=models&voice=[#VOICE#]" class="btn btn-danger btn-sm btn-action" onclick="return confirm('<#LANG_SANOTTS_CONFIRM_DELETE#>'.replace('%s','[#VOICE#]'))"><#LANG_SANOTTS_DELETE#></a>
 [#else#]
@@ -41,22 +74,42 @@
        </td>
       </tr>
       <tr class="voice-desc">
-       <td colspan="5">[#DESC#][#if QUALITY=""#][#else#]<br>[#QUALITY#][#endif#][#if NOTE=""#][#else#]<br><span class="text-muted">[#NOTE#]</span>[#endif#]</td>
+       <td colspan="5"><a href="#" class="voice-more" onclick="this.parentNode.parentNode.parentNode.classList.toggle('open');this.innerHTML=this.parentNode.parentNode.parentNode.classList.contains('open')?'<#LANG_SANOTTS_LESS#> &#9652;':'<#LANG_SANOTTS_MORE#> &#9662;';return false"><#LANG_SANOTTS_MORE#> &#9662;</a><div class="voice-desc-body">[#DESC#][#if QUALITY=""#][#else#]<br>[#QUALITY#][#endif#][#if NOTE=""#][#else#]<br><span class="text-muted">[#NOTE#]</span>[#endif#]</div></td>
       </tr>
-[#end AVAILABLE_MODELS#]
     </tbody>
+[#end AVAILABLE_MODELS#]
   </table>
   <div class="help-block" style="font-size:12px;margin-bottom:10px"><#LANG_SANOTTS_QUALITY_HINT#></div>
-  <p class="help-block"><#LANG_SANOTTS_CUSTOM_HINT#> <code>[#VOICES_DIR#]/&lt;<#LANG_SANOTTS_NAME#>&gt;/</code></p>
+  <p class="help-block" style="overflow-wrap:anywhere;word-break:break-word"><#LANG_SANOTTS_CUSTOM_HINT#> <code>[#VOICES_DIR#]/&lt;<#LANG_SANOTTS_NAME#>&gt;/</code></p>
 </fieldset>
 
 <fieldset>
   <legend><#LANG_SANOTTS_DIAG#></legend>
-  <table class="table table-condensed" style="font-size:12px">
+  <table class="table table-condensed" style="font-size:12px;table-layout:fixed;width:100%">
    <tbody id="sanotts_diag"><tr><td>…</td></tr></tbody>
   </table>
 </fieldset>
 <script>
+// Фильтр голосов: язык (по умолчанию — язык выбранного голоса) и «только установленные».
+function sanottsVoiceFilter(){
+ var lang=document.getElementById('sanotts_vlang').value,inst=document.getElementById('sanotts_vinst').checked;
+ var b=document.querySelectorAll('#model_table tbody.voice'),n=0;
+ for(var i=0;i<b.length;i++){
+  var show=(!lang||b[i].getAttribute('data-lang')===lang)&&(!inst||b[i].getAttribute('data-installed')==='1');
+  b[i].style.display=show?'':'none';if(show)n++;
+ }
+ document.getElementById('sanotts_vcount').textContent=n+' / '+b.length;
+ try{sessionStorage.setItem('sanotts_vfilter',JSON.stringify({l:lang,i:inst}))}catch(e){}
+}
+(function(){
+ var sel=document.getElementById('sanotts_vlang'),b=document.querySelectorAll('#model_table tbody.voice'),seen={},cur='';
+ for(var i=0;i<b.length;i++){var l=b[i].getAttribute('data-lang');if(b[i].getAttribute('data-current')==='1')cur=l;
+  if(l&&!seen[l]){seen[l]=1;var o=document.createElement('option');o.value=l;o.textContent=l;sel.appendChild(o);}}
+ var st=null;try{st=JSON.parse(sessionStorage.getItem('sanotts_vfilter')||'null')}catch(e){}
+ if(st){sel.value=seen[st.l]?st.l:'';document.getElementById('sanotts_vinst').checked=!!st.i;}
+ else sel.value=cur;
+ sanottsVoiceFilter();
+})();
 // Диагностика — отдельным запросом: в ней пробный синтез, и страница не ждёт его.
 (function(){
  var tb=document.getElementById('sanotts_diag');
@@ -68,7 +121,7 @@
   for(var i=0;i<r.rows.length;i++){
    var d=r.rows[i];
    // NAME и VALUE приходят уже экранированными для HTML.
-   h+='<tr><td style="width:30%;white-space:pre"><code>'+d.NAME+'</code></td><td>'+
+   h+='<tr><td style="width:30%;white-space:pre-wrap;overflow-wrap:anywhere"><code>'+d.NAME+'</code></td><td style="overflow-wrap:anywhere;word-break:break-word">'+
       (d.OK==='1'?'<span style="color:#28a745">&#10004;</span>':'<span style="color:#dc3545">&#10008;</span>')+' '+d.VALUE+'</td></tr>';
   }
   tb.innerHTML=h;

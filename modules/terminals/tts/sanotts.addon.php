@@ -1,9 +1,11 @@
 <?php
 
 /**
- * TTS для модуля «Терминалы»: тип TTS «sanotts» — речь sanoTTS из динамика
- * сервера (paplay / aplay / ffplay / play-audio в Termux, в Windows — плеер
- * PowerShell).
+ * TTS для модуля «Терминалы»: тип TTS «sanotts».
+ *  - терминал MAIN (сам сервер) — речь из динамика сервера (paplay / aplay /
+ *    ffplay в Linux, sanotts_play на Android, в Windows — плеер PowerShell);
+ *  - любой другой терминал — во вкладки браузера, открытые как этот терминал
+ *    (адрес с ?terminal=имя или вход с IP из поля «Хост»), через WebSocket.
  *
  * «Терминалы» подключают этот файл и создают объект класса с именем типа —
  * new sanotts($terminal). Класс sanotts — это сам модуль, поэтому здесь нового
