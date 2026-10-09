@@ -14,7 +14,7 @@ require_once dirname(__FILE__) . '/lib/rules.php';
 
 class sanotts extends module
 {
-    const VERSION = '3.2.2';
+    const VERSION = '3.2.3';
     // Движок живёт внутри MajorDoMo (cms/sanotts, см. defaultBase()): туда
     // пишет пользователь веб-сервера на любой системе — Debian, Docker, Termux —
     // без root и sudo.
