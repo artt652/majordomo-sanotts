@@ -20,7 +20,7 @@
  */
 class SanottsRuText
 {
-    const VERSION = 'ru-20261002b';
+    const VERSION = 'ru-20261016c';
 
     // ---------------------------------------------------------------------
     // Совместимость с регулярными выражениями JS
@@ -266,6 +266,7 @@ class SanottsRuText
     public static function moduleRules($text)
     {
         $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', ' ', (string)$text);
+        $text = self::stripMarkdown($text);
         $text = self::rep($text, '(\d)\s*км\s*\/\s*ч(?![а-яё])', 'gi', '$1 км в час');
         $text = self::rep($text, '(^|[^а-яё])км\s*\/\s*ч(?![а-яё])', 'gi', '$1километров в час');
         $text = self::rep($text, '(\d)\s*м\s*\/\s*с(?![а-яё])', 'gi', '$1 м в секунду');
@@ -1673,6 +1674,140 @@ class SanottsRuText
         return array($m[1], $w, $n, $m[3]);
     }
 
+    // ---------------------------------------------------------------------
+    // Разметка и знаки: Markdown, «слово/слово», «~», диапазоны чисел
+    // ---------------------------------------------------------------------
+
+    /**
+     * Разметка Markdown (ответы ИИ, сообщения): **жирный**, *курсив*, `код`,
+     * # заголовок, > цитата, - пункт списка, [текст](ссылка). Иначе espeak
+     * читает «звёздочка звёздочка», «решётка».
+     */
+    public static function stripMarkdown($text)
+    {
+        if (!self::test($text, '[*_`#>\[•]|(^|\n)[ \t]*[-+][ \t]')) return $text;
+        $text = self::rep($text, '!?\[([^\]\n]*)\]\([^()\s]+\)', 'g', '$1');              // [текст](ссылка)
+        $text = self::rep($text, '(^|\n)[ \t]{0,3}#{1,6}[ \t]+', 'g', '$1');                // # Заголовок
+        $text = self::rep($text, '(^|\n)[ \t]*>[ \t]?', 'g', '$1');                          // > цитата
+        $text = self::rep($text, '(^|\n)[ \t]*[-*+•][ \t]+', 'g', '$1');                     // - пункт
+        $text = self::rep($text, '(\*\*|__)(?=\S)([^\n]*?\S)\1', 'g', '$2');                 // **жирный**
+        $text = self::rep($text, '(^|[^A-Za-z0-9*])\*(?=\S)([^*\n]*?\S)\*(?![A-Za-z0-9*])', 'g', '$1$2');   // *курсив*
+        $text = self::rep($text, '(^|[^A-Za-z0-9А-Яа-яЁё_])_(?=\S)([^_\n]*?\S)_(?![A-Za-z0-9А-Яа-яЁё_])', 'g', '$1$2');
+        $text = self::rep($text, '`+', 'g', '');
+        return self::rep($text, '\*{2,}|_{2,}', 'g', '');
+    }
+
+    /**
+     * «облачно/пасмурно» -> облачно или пасмурно; «~77%», «≈5» -> около (после
+     * «около», «примерно» знак просто убирается); «10 °C» -> 10°C (иначе знак
+     * отрывается от числа и «градусов» теряется); диапазоны чисел — rangeWords().
+     */
+    public static function normalizeSymbols($text)
+    {
+        // «плюс13», «минус 5» (например, после своего правила «+ → плюс») — как знак числа,
+        // иначе не склоняются ни число, ни диапазон: «до плюс13…плюс17 °C».
+        $text = self::rep($text, '(^|[^А-Яа-яЁё])(плюс|минус)\s*(?=\d)', 'gi', function ($g) {
+            return $g[1] . (SanottsRuText::lc($g[2]) === 'плюс' ? '+' : '-');
+        });
+        // км/ч, м/с и т. п. к этому моменту уже словами (moduleRules)
+        $text = self::rep($text, '(^|[^А-Яа-яЁё])(и)\s?\/\s?(или)(?![А-Яа-яЁё])', 'gi', '$1$3');
+        // единицы после числа («3000 об/мин», «5 л/мин») — не «или»
+        $text = self::rep($text, '(\d\s*)?(?<![А-Яа-яЁё])([А-Яа-яЁё]{2,})\s?\/\s?([А-Яа-яЁё]{2,})(?![А-Яа-яЁё]*\/)', 'g', function ($g) {
+            return $g[1] !== null && $g[1] !== '' ? $g[0] : $g[2] . ' или ' . $g[3];
+        });
+        // «9:00-18:00» -> с 9:00 до 18:00 (падеж времени — по предлогу, см. normalizeNumbers)
+        $text = self::rep($text, '(^|[^А-Яа-яЁё\d:])([Сс]\s+)?((?:[01]?\d|2[0-3]):[0-5]\d)\s*[\-‐‑‒–—―−]\s*((?:[01]?\d|2[0-3]):[0-5]\d)(?![\d:])', 'g', function ($g) {
+            return $g[1] . ($g[2] !== null && $g[2] !== '' ? $g[2] : 'с ') . $g[3] . ' до ' . $g[4];
+        });
+        $text = self::rep($text, '(^|[^А-Яа-яЁё])(около|примерно|приблизительно|порядка)\s*[~≈]\s*(?=[+\-−]?\d)', 'gi', '$1$2 ');
+        $text = self::rep($text, '(^|[\s(,:;])[~≈]\s*(?=[+\-−]?\d)', 'g', '$1около ');
+        $text = self::rep($text, '(\d)\s+°', 'g', '$1°');
+        $text = self::rep($text, '(\d)\s+%', 'g', '$1%');
+        return self::rangeWords($text);
+    }
+
+    /**
+     * Диапазоны чисел: «+7…+10 °C», «77–97%», «3-5 градусов», «-5...-3».
+     *   без предлога          -> от плюс семи до плюс десяти градусов
+     *   около/примерно/~      -> примерно от … до …
+     *   другой предлог (до…)  -> до плюс тринадцати плюс семнадцати градусов
+     * Годы («1941–1945», «в 2020-2025 годах»), время, телефоны, даты — не трогаются.
+     */
+    public static function rangeWords($text)
+    {
+        if (!self::test($text, '\d\s*(?:…|\.\.\.|[\-‐‑‒–—―−])\s*[+\-−]?\d')) return $text;
+        self::units_();
+        $NUM = '([+\-−]?)(\d+)(?:[.,](\d+))?';
+        $re = '(?<![\d.,:A-Za-zА-Яа-яЁё+\-−$€₽₴£])' . $NUM . '\s*(?:…|\.\.\.|[\-‐‑‒–—―−])\s*' . $NUM . '(%|°\s?[CС]?)?(?![\d:]|[.,]\d|[\-‐‑‒–—―−]\d|[A-Za-zА-Яа-яЁё]|\s?°)';
+        $text = self::rep($text, $re, 'g', function ($g, $off, $str) {
+            return SanottsRuText::rangeText($g, $off, $str);
+        });
+        // «около 7–10» -> «примерно от семи до десяти»: слово перед диапазоном заменяется
+        $text = self::rep($text, '(около|примерно|приблизительно|порядка)\s*\u0002', 'gi', function ($g) {
+            return (SanottsRuText::test($g[1], '^[А-ЯЁ]') ? 'Примерно' : 'примерно') . ' ';
+        });
+        $text = str_replace("\x02", '', $text);
+        // слово-единица после диапазона — в падеже второго числа
+        $text = self::rep($text, '\u0001([^\u0001]*)\u0001\s*[А-Яа-яЁё]+(\.?)', 'g', function ($g, $off, $str) {
+            $end = $g[2] === '.' && SanottsRuText::test(substr($str, $off + strlen($g[0])), '^(\s*$|\s+[А-ЯЁA-Z])') ? '.' : '';
+            return ' ' . $g[1] . $end;
+        });
+        return str_replace("\x01", '', $text);
+    }
+
+    /** Замена одного диапазона (см. rangeWords). */
+    public static function rangeText($g, $off, $str)
+    {
+        $before = substr($str, 0, $off);
+        $after = substr($str, $off + strlen($g[0]));
+        $prevM = self::match($before, '([А-Яа-яЁё]+)[^А-Яа-яЁё\d,.;:!?]*$');
+        $prev = $prevM && !self::test(substr($before, (int)$prevM['index']), '[,.;:!?]') ? self::lc($prevM[1]) : '';
+        $nextM = self::match($after, '^\s*([А-Яа-яЁё]+\.?)');
+        $next = $nextM ? self::lc(self::rep($nextM[1], '\.$', '', '')) : '';
+        $a = self::jsNumber($g[2]);
+        $b = self::jsNumber($g[5]);
+        // годы и номера — не диапазон величин
+        if (self::test($next, '^(год|году|года|годом|годе|годах|годы|гг|г)$') || ($a >= 1000 && $b >= 1000 && ($g[3] === null || $g[3] === '') && ($g[6] === null || $g[6] === '') && !$g[7])) return $g[0];
+        if ($b < $a && $g[1] === '' && $g[4] === '' && !($g[7] ?? '')) return $g[0];   // «12-3» — не диапазон
+        $approx = in_array($prev, array('около', 'примерно', 'приблизительно', 'порядка'), true);
+        $kase = $approx ? null : self::caseFromPrep($prev);
+        if ($kase !== null && $kase !== 'gen' && $kase !== 'dat' && $kase !== 'ins' && $kase !== 'prep') $kase = null;
+        $c = $kase === null ? 'gen' : $kase;
+        $unit = $g[7] !== null && $g[7] !== '' ? self::chars($g[7])[0] : null;
+        $gender = 'm';
+        $nounKey = null;
+        $half = null;
+        if ($unit === null) {
+            if (self::unit($next) !== null) { $nounKey = $next; if (in_array($next, self::$FEM_UNITS, true)) $gender = 'f'; }
+            elseif (($half = self::halfNoun($next)) !== null) { if ($half['f']) $gender = 'f'; }
+            elseif (self::test($next, self::FEM_NOUN)) $gender = 'f';
+        }
+        $say = function ($sign, $int, $frac) use ($c, $gender) {
+            $s = $sign === '+' ? 'плюс ' : ($sign === '-' || $sign === '−' ? 'минус ' : '');
+            return $s . ($frac !== null && $frac !== '' ? SanottsRuText::decimalWordsP($int, $frac, $c) : SanottsRuText::cardinalP(SanottsRuText::num($int), $c, $gender));
+        };
+        $A = $say($g[1], $g[2], $g[3]);
+        $B = $say($g[4], $g[5], $g[6]);
+        $bDec = $g[6] !== null && $g[6] !== '';
+        $noun = '';
+        if ($unit !== null) $noun = ' ' . self::nounAgree($unit, $b, $c, $bDec);
+        $out = $kase === null ? "от $A до $B$noun" : "$A $B$noun";
+        // слово-единица после диапазона («3-5 градуса», «2-4 мин») — в падеж второго числа
+        if ($unit === null && $nextM && ($nounKey !== null || $half !== null)) {
+            if ($nounKey !== null) $w = self::nounAgree($nounKey, $b, $c, $bDec);
+            else {
+                $f = $half['forms'];
+                $w = $bDec ? $f[1] : ($c === 'gen' ? (fmod($b, 10) == 1 && fmod($b, 100) != 11 ? $f[1] : $f[2]) : null);
+            }
+            if ($w !== null) $out .= "\x01" . $w . "\x01";
+        }
+        if ($approx) $out = "\x02" . $out;
+        return $out;
+    }
+
+    public static function cardinalP($n, $kase, $gender) { return self::cardinal($n, $kase, $gender); }
+    public static function decimalWordsP($i, $f, $kase) { return self::decimalWords($i, $f, $kase); }
+
     public static function lineBreaksToPauses($text)
     {
         if (!self::test($text, '[\r\n]')) return $text;
@@ -1723,6 +1858,7 @@ class SanottsRuText
         $text = self::dropLinks($text);
         $text = self::lineBreaksToPauses($text);
         $text = self::bracketsToPauses($text);
+        $text = self::normalizeSymbols($text);
         $text = self::normalizeCurrency($text);
         $text = self::normalizeDims($text);
         $text = self::normalizeRoman($text);

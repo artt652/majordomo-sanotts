@@ -14,7 +14,7 @@ require_once dirname(__FILE__) . '/lib/rules.php';
 
 class sanotts extends module
 {
-    const VERSION = '3.2.3';
+    const VERSION = '3.2.4';
     // Движок живёт внутри MajorDoMo (cms/sanotts, см. defaultBase()): туда
     // пишет пользователь веб-сервера на любой системе — Debian, Docker, Termux —
     // без root и sudo.
@@ -1855,8 +1855,9 @@ EOD;
         foreach ((array)$rows as $r) {
             $title = $r['TITLE'] !== '' ? $r['TITLE'] : $r['NAME'];
             $tts = (int)$r['CANTTS'] && $r['TTS_TYPE'] !== '' ? $r['TTS_TYPE'] : LANG_SANOTTS_SEND_NO_TTS;
-            // Отправка — только на терминалы с TTS sanotts; остальные видны, но неактивны.
-            $ours = (int)$r['CANTTS'] && $r['TTS_TYPE'] === 'sanotts';
+            // Отправка — на терминалы с TTS sanotts, а с «играть плеером» — и с TTS другого
+            // типа (файлом, как по SAY_CACHED_READY); остальные видны, но неактивны.
+            $ours = (int)$r['CANTTS'] && ($r['TTS_TYPE'] === 'sanotts' || ($this->cachedDelivery() && $r['TTS_TYPE'] !== ''));
             $list[] = array('VALUE' => $this->e($r['NAME']), 'TITLE' => $this->e($title . ' (' . $tts . ')'),
                 'DISABLED' => $ours ? '' : 'disabled');
         }
@@ -1873,6 +1874,7 @@ EOD;
 
         // Сначала — всё, что можно проверить без синтеза.
         $rec = null;
+        $foreign = false;
         if ($terminal !== '') {
             $bad = $this->baseUrlProblem();
             if ($bad !== '') {
@@ -1887,8 +1889,9 @@ EOD;
                 return $res;
             }
             $title = $rec['TITLE'] !== '' ? $rec['TITLE'] : $rec['NAME'];
-            if (!(int)$rec['CANTTS'] || $rec['TTS_TYPE'] !== 'sanotts') {
-                $res['error'] = LANG_SANOTTS_SEND_ONLY;
+            $foreign = $this->cachedDelivery() && self::isForeignTts($rec);
+            if (!$foreign && (!(int)$rec['CANTTS'] || $rec['TTS_TYPE'] !== 'sanotts')) {
+                $res['error'] = $this->cachedDelivery() ? LANG_SANOTTS_SEND_ONLY_PLAYER : LANG_SANOTTS_SEND_ONLY;
                 return $res;
             }
         }
@@ -1912,6 +1915,19 @@ EOD;
                 return $res;
             }
             $res['steps'][] = sprintf(LANG_SANOTTS_SEND_WS_OK, $url);
+            $res['ok'] = true;
+            return $res;
+        }
+
+        // Терминал с TTS другого типа: файл — sayCached() его аддона, как по SAY_CACHED_READY.
+        if ($foreign) {
+            list($ok, $err) = $this->addonSayCached($rec, $text, $file);
+            $this->log("test send to terminal {$rec['NAME']} ({$rec['TTS_TYPE']}): sayCached " . ($ok ? 'ok' : 'failed') . ": $file");
+            if (!$ok) {
+                $res['error'] = $err;
+                return $res;
+            }
+            $res['steps'][] = sprintf(LANG_SANOTTS_SEND_CACHED_OK, $title, $rec['TTS_TYPE']);
             $res['ok'] = true;
             return $res;
         }
@@ -2693,22 +2709,15 @@ EOD;
     }
 
     /**
-     * «Терминалы» зовут sayCached(), когда другой TTS-модуль (piper_tts и т. п.)
-     * опубликовал SAY_CACHED_READY со своим файлом. Терминал с TTS «sanotts» эту
-     * фразу и так получает через say() — нашим голосом; чужой файл не играем,
-     * иначе она прозвучала бы дважды разными голосами. Свой файл из кэша — играем.
+     * «Терминалы» зовут sayCached(), когда кто-то опубликовал SAY_CACHED_READY:
+     * другой TTS-модуль (piper_tts и т. п.) или сам sanotts — для терминалов с TTS
+     * другого типа. Терминал с TTS «sanotts» фразу уже получил через say(), поэтому
+     * файл не играем ни чужой (прозвучало бы дважды разными голосами), ни свой.
      */
     public function sayCached($phrase, $level = 0, $cached_file = '')
     {
-        if (empty($this->config)) $this->getConfig();
         if ($cached_file === '' || !file_exists($cached_file)) return $this->say($phrase, $level);
-        $own = strpos(basename($cached_file), 'sanotts_') === 0 &&
-            str_replace('\\', '/', realpath(dirname($cached_file))) === str_replace('\\', '/', (string)realpath($this->config['CACHE_DIR']));
-        if (!$own) return true;
-        // Файл уже есть — играем его; не вышло — повторный синтез той же фразы не поможет.
-        if ($this->terminalIsMain()) return $this->terminalPlayFile($cached_file);
-        if ($this->terminalPlayer() !== '') return $this->playerPlayFile($cached_file) !== null;
-        return $this->browserPostFile($cached_file, $this->terminalName()) !== null;
+        return true;
     }
 
     private function terminalPlayPhrase($phrase)
@@ -2777,23 +2786,110 @@ EOD;
         if (empty($message)) return;
 
         $destination = isset($details['destination']) ? $details['destination'] : '';
+        $level = isset($details['level']) ? (int)$details['level'] : (isset($details['IMPORTANCE']) ? (int)$details['IMPORTANCE'] : 0);
 
-        // sayTo() на терминал: с TTS «sanotts» его озвучивают «Терминалы» — вызовом
-        // say() этого модуля (плеер терминала, вкладки или динамик сервера MAIN);
-        // терминал с другим типом TTS озвучивает его собственный TTS. Здесь — ничего.
-        if ($event == 'SAYTO' && $destination !== '') return;
+        // sayTo() и ask() на терминал: с TTS «sanotts» их озвучивают «Терминалы» — вызовом
+        // say()/ask() этого модуля (плеер терминала, вкладки или динамик сервера MAIN).
+        // Терминалу с TTS другого типа (pipup, mediaplayer…) при «играть плеером» —
+        // готовый файл событием SAY_CACHED_READY, как у других генераторов речи.
+        if ($event == 'SAYTO' || $event == 'ASK') {
+            if ($destination !== '' && $this->cachedDelivery() && self::isForeignTts($this->terminalByDestination($destination))) {
+                $this->publishCached($message, $level, $event, $destination);
+            }
+            return;
+        }
 
         // say() — вкладкам без терминала (обычные страницы MajorDoMo). У них нет своего
         // порога, поэтому — общий minMsgLevel, как у терминалов без своего порога.
         // Вкладки терминалов эту рассылку пропускают (sanotts.js) и получают фразу через
         // «Терминалы» — с порогом своего терминала.
-        $level = isset($details['level']) ? (int)$details['level'] : (isset($details['IMPORTANCE']) ? (int)$details['IMPORTANCE'] : 0);
         $min = (int)getGlobal('ThisComputer.minMsgLevel');
         if ($level < $min) {
             $this->log("SAY level $level < minMsgLevel $min — browser tabs skipped");
-            return;
+        } else {
+            $this->browserDeliver($message);
         }
-        $this->browserDeliver($message);
+        // Терминалам с TTS другого типа — файл через SAY_CACHED_READY; порог уровня
+        // каждого терминала проверяют «Терминалы».
+        if ($this->cachedDelivery() && $this->foreignTtsExists()) {
+            $this->publishCached($message, $level, 'SAY');
+        }
+    }
+
+    /** «Играть плеером»: терминалам с TTS другого типа — готовый файл (SAY_CACHED_READY). */
+    private function cachedDelivery()
+    {
+        return (int)$this->config['USE_PLAYER'] === 1;
+    }
+
+    /**
+     * Терминал с включённым TTS другого типа (pipup, mediaplayer…): синтезировать сам
+     * он не умеет или говорит своим голосом, а наш файл получает через sayCached().
+     */
+    private static function isForeignTts($rec)
+    {
+        return is_array($rec) && !empty($rec['ID']) && (int)$rec['CANTTS']
+            && $rec['TTS_TYPE'] !== '' && $rec['TTS_TYPE'] !== 'sanotts';
+    }
+
+    private function foreignTtsExists()
+    {
+        $r = SQLSelectOne("SELECT ID FROM terminals WHERE CANTTS=1 AND TTS_TYPE!='' AND TTS_TYPE!='sanotts' LIMIT 1");
+        return !empty($r['ID']);
+    }
+
+    /** Терминал по имени или адресу — как его ищут «Терминалы» для sayTo(). */
+    private function terminalByDestination($destination)
+    {
+        $rec = getTerminalsByName($destination, 1);
+        if (empty($rec[0]['ID'])) $rec = getTerminalsByHost($destination, 1);
+        return empty($rec[0]['ID']) ? null : $rec[0];
+    }
+
+    /**
+     * Фраза целиком — в кэш, затем SAY_CACHED_READY: «Терминалы» вызывают sayCached()
+     * аддона TTS каждого подходящего терминала (pipup — окно со звуком, mediaplayer —
+     * ссылка плееру). message — исходная фраза: pipup по ней находит окно, открытое say().
+     */
+    private function publishCached($message, $level, $event, $destination = '')
+    {
+        $file = $this->renderToCache($message);
+        if ($file === null) {
+            $this->log('SAY_CACHED_READY not sent: synthesis failed: ' . $this->lastError);
+            return null;
+        }
+        $data = array('level' => $level, 'filename' => $file, 'event' => $event, 'message' => $message);
+        if ($destination !== '') $data['destination'] = $destination;
+        $note = "SAY_CACHED_READY $event" . ($destination !== '' ? " destination=$destination" : '') . ": $file";
+        $self = $this;
+        $send = function () use ($data, $note, $self) {
+            processSubscriptionsSafe('SAY_CACHED_READY', $data);
+            $self->logPublic($note);
+        };
+        // Событие — в конце запроса: SAY/SAYTO здесь же ещё обработают «Терминалы»
+        // (у sanotts приоритет выше), и pipup сначала откроет окно с текстом, а файл
+        // придёт в него вторым. Иначе фраза из кэша обгоняет say() аддона, и окно
+        // без звука перерисовывает окно со звуком. Из консоли (циклы) — сразу.
+        if (PHP_SAPI === 'cli') $send(); else register_shutdown_function($send);
+        return $file;
+    }
+
+    /**
+     * Сразу вызвать sayCached() аддона TTS терминала (кнопка «Отправить»).
+     * array(ok, текст ошибки).
+     */
+    private function addonSayCached($rec, $phrase, $file)
+    {
+        $type = (string)$rec['TTS_TYPE'];
+        $addon = DIR_MODULES . 'terminals/tts/' . $type . '.addon.php';
+        if (!preg_match('/^\w+$/', $type) || !is_file($addon)) return array(false, sprintf(LANG_SANOTTS_SEND_NO_ADDON, $type));
+        include_once DIR_MODULES . 'terminals/tts_addon.class.php';
+        include_once $addon;
+        if (!class_exists($type, false)) return array(false, sprintf(LANG_SANOTTS_SEND_NO_ADDON, $type));
+        $tts = new $type($rec);
+        $r = $tts->sayCached($phrase, 9999, $file);
+        // mediaplayer при успехе ничего не возвращает; неудача — false или 0.
+        return ($r === false || $r === 0) ? array(false, sprintf(LANG_SANOTTS_SEND_CACHED_FAIL, $type)) : array(true, '');
     }
 
     /**
@@ -3125,6 +3221,7 @@ EOD;
     {
         subscribeToEvent($this->name, 'SAY', '', 110);
         subscribeToEvent($this->name, 'SAYTO', '', 110);
+        subscribeToEvent($this->name, 'ASK', '', 110);
         // SAYREPLY не нужен: sayReply() сам вызывает sayTo() или say(), а потом шлёт
         // SAYREPLY — подписка озвучивала ответ второй раз. Снимаем и у прежних версий.
         unsubscribeFromEvent($this->name, 'SAYREPLY');
@@ -3177,6 +3274,7 @@ PHP;
     {
         unsubscribeFromEvent($this->name, 'SAY');
         unsubscribeFromEvent($this->name, 'SAYTO');
+        unsubscribeFromEvent($this->name, 'ASK');
         unsubscribeFromEvent($this->name, 'SAYREPLY');
 
         // Строки прежних версий указывали на общий modules/prepend.php — его путь нужен,
