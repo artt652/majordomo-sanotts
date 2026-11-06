@@ -14,7 +14,7 @@ require_once dirname(__FILE__) . '/lib/rules.php';
 
 class sanotts extends module
 {
-    const VERSION = '3.2.4';
+    const VERSION = '3.2.5';
     // Движок живёт внутри MajorDoMo (cms/sanotts, см. defaultBase()): туда
     // пишет пользователь веб-сервера на любой системе — Debian, Docker, Termux —
     // без root и sudo.
@@ -171,6 +171,13 @@ class sanotts extends module
         $user = function_exists('posix_geteuid') && function_exists('posix_getpwuid')
             ? (($pw = @posix_getpwuid(posix_geteuid())) ? $pw['name'] : posix_geteuid()) : (string)(getenv('USERNAME') ?: '?');
         $add('PHP user', true, $user . ' — PHP ' . PHP_VERSION . ', ' . PHP_OS . ' ' . SanottsEngine::arch());
+        // PATH процесса PHP: у php-fpm (clear_env = yes) пуст — программы модуль ищет и в
+        // стандартных каталогах, но сторонним модулям и скриптам может понадобиться
+        // env[PATH] в настройках пула php-fpm.
+        $path = trim((string)getenv('PATH'));
+        $add('PHP PATH', true, ($path !== '' ? $path : 'пуст') . ' (SAPI ' . PHP_SAPI . ')'
+            . ($path === '' && !SanottsEngine::isWindows() ? ' — программы ищутся в ' . SanottsEngine::STD_BIN_DIRS
+                . (PHP_SAPI === 'fpm-fcgi' ? '; php-fpm не передаёт окружение (clear_env), для других модулей — env[PATH] в секции [www] пула' : '') : ''));
         $obd = str_replace('\\', '/', (string)ini_get('open_basedir'));
         $baseN = str_replace('\\', '/', SanottsEngine::trimDir($this->config['BASE']));
         $rootN = defined('ROOT') ? str_replace('\\', '/', SanottsEngine::trimDir(ROOT)) : '/var/www';
@@ -235,6 +242,15 @@ class sanotts extends module
         if (ini_get('allow_url_fopen') && in_array('https', stream_get_wrappers(), true)) $dl[] = 'php https';
         foreach (array('curl', 'wget') as $t) if (SanottsEngine::haveTool($t)) $dl[] = $t;
         $add('downloader', (bool)$dl, $dl ? implode(', ', $dl) : 'нечем скачивать: включите php-curl или openssl (allow_url_fopen)');
+        if (!SanottsEngine::isWindows()) {
+            $pl = array();
+            if (($own = $this->ownPlayer()) !== '') $pl[] = SanottsEngine::playerName() . ': ' . $own;
+            foreach (array('play-audio', 'paplay', 'aplay', 'ffplay') as $t) {
+                if (($p = SanottsEngine::findTool($t)) !== null) $pl[] = $t . ': ' . $p;
+            }
+            $note = SanottsEngine::pathEmpty() ? ' (PATH у PHP пуст — php-fpm, clear_env; искали в ' . SanottsEngine::STD_BIN_DIRS . ')' : '';
+            $add('server player', $pl || !(int)$this->config['MAIN_SPEAKER'], ($pl ? implode(', ', $pl) : 'не найден') . $note);
+        }
         $php = SanottsEngine::phpCli();
         $add('php cli', true, $php !== null && !SanottsEngine::isWindows() ? $php . ' (установка — фоновым процессом)'
             : ($php !== null ? $php . '; ' : '') . 'установка идёт внутри запроса веб-сервера');
@@ -1294,8 +1310,9 @@ EOD;
         $user = function_exists('posix_geteuid') && function_exists('posix_getpwuid') && ($pw = @posix_getpwuid(posix_geteuid()))
             ? $pw['name'] : 'www-data';
         // От того же пользователя, что и веб-сервер, иначе файлы окажутся чужими.
-        return (function_exists('posix_geteuid') && posix_geteuid() !== 0 && !self::isAndroid() && SanottsEngine::haveTool('sudo'))
-            ? 'sudo -u ' . $user . ' ' . $php . ' ' . $script
+        $sudo = SanottsEngine::findTool('sudo');
+        return (function_exists('posix_geteuid') && posix_geteuid() !== 0 && !self::isAndroid() && $sudo !== null)
+            ? $sudo . ' -u ' . $user . ' ' . $php . ' ' . $script
             : $php . ' ' . $script;
     }
 
@@ -2597,6 +2614,14 @@ EOD;
         return is_file($f) ? $f : '';
     }
 
+    /** Где искали программы — для журнала и диагностики. */
+    private function searchedDirs()
+    {
+        return SanottsEngine::pathEmpty()
+            ? 'PATH of PHP is empty (php-fpm clear_env), searched ' . SanottsEngine::STD_BIN_DIRS
+            : 'PATH + ' . SanottsEngine::STD_BIN_DIRS;
+    }
+
     private function serverPlayers()
     {
         static $found = null;
@@ -2739,7 +2764,6 @@ EOD;
             list($ok, $rc, ) = SanottsEngine::run(array('powershell', '-NoProfile', '-NonInteractive', '-Command', $ps));
             return $ok && $rc === 0;
         }
-        static $have = array();
         $players = array(
             'paplay'     => array('paplay', $file),
             'aplay'      => array('aplay', '-q', $file),
@@ -2753,13 +2777,15 @@ EOD;
             $players = array('play-audio' => $players['play-audio']) + $players;
             if (($own = $this->ownPlayer()) !== '') {
                 $players = array(SanottsEngine::playerName() => array($own, $file)) + $players;
-                $have[SanottsEngine::playerName()] = true;
             }
         }
         $tried = array();
         foreach ($players as $cmd => $args) {
-            if (!isset($have[$cmd])) $have[$cmd] = SanottsEngine::haveTool($cmd);
-            if (!$have[$cmd]) continue;
+            // По полному пути: у php-fpm PATH обычно пуст (clear_env), программа — на месте.
+            if ($cmd !== SanottsEngine::playerName()) {
+                if (($exe = SanottsEngine::findTool($cmd)) === null) continue;
+                $args[0] = $exe;
+            }
             list($ok, $rc, $err) = SanottsEngine::run($args);
             if ($ok && $rc === 0) {
                 $this->log("terminal: played with $cmd: $file");
@@ -2769,7 +2795,8 @@ EOD;
             $tried[] = $cmd;
             $this->log("terminal: $cmd failed (code $rc)" . ($err !== '' ? ': ' . mb_substr($err, 0, 300) : ''));
         }
-        if (!$tried) $this->log('terminal: no audio player found (paplay, aplay, ffplay, play-audio' . (SanottsEngine::isAndroid() ? ', sanotts_play — reinstall the engine' : '') . ') — install one or turn off "Terminal MAIN: play on the server speaker"');
+        if (!$tried) $this->log('terminal: no audio player found (paplay, aplay, ffplay, play-audio' . (SanottsEngine::isAndroid() ? ', sanotts_play — reinstall the engine' : '')
+            . ') in ' . $this->searchedDirs() . ' — install one or turn off "Terminal MAIN: play on the server speaker"');
         return false;
     }
 

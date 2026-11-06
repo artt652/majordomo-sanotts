@@ -48,7 +48,7 @@ $dictionary = array(
     'SANOTTS_SEND_PLAYER_OK' => 'Passed to the player of terminal "%s" (%s): %s — the player must be able to open this link',
     'SANOTTS_SEND_PLAYER_FAIL' => 'the file is outside the site and cannot be given to the player by URL (the cache folder must be inside MajorDoMo)',
     'SANOTTS_MAIN_SPEAKER' => 'Terminal MAIN: play on the server speaker',
-    'SANOTTS_MAIN_SPEAKER_NONE' => 'No player found on the server (paplay, aplay, ffplay, play-audio) — the server speaker cannot play. Install one or turn this off: then MAIN plays in browser tabs.',
+    'SANOTTS_MAIN_SPEAKER_NONE' => 'No player found on the server (paplay, aplay, ffplay, play-audio; searched PATH and /usr/local/bin, /usr/bin, /bin etc.) — the server speaker cannot play. Install one or turn this off: then MAIN plays in browser tabs.',
     'SANOTTS_MAIN_SPEAKER_HINT' => 'For terminals with TTS type "sanotts". On — sayTo() to MAIN and say() play only from the speaker of the computer running MajorDoMo, even if MAIN has a player (Linux needs paplay, aplay or ffplay; built in on Android and Windows). Off — MAIN, like any other terminal, plays in browser tabs opened as this terminal (?terminal=MAIN or opened from the IP in the "Host" field).',
     'SANOTTS_SEND_SPEAKER_OK' => 'Played on the server speaker (terminal MAIN)',
     'SANOTTS_SEND_SPEAKER_FAIL' => 'could not play on the server speaker — see the module log ("terminal: …" lines): a player exists but failed (e.g. the sound server is not running)',

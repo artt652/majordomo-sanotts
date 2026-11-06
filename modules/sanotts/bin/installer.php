@@ -629,10 +629,10 @@ class SanottsEngine
         }
         // Внешние программы: curl есть и в Windows 10+ (System32\curl.exe).
         foreach (array('curl', 'wget') as $tool) {
-            if (!self::haveTool($tool)) continue;
+            if (($exe = self::findTool($tool)) === null) continue;
             $args = $tool === 'curl'
-                ? array('curl', '-fsSL', '--retry', '3', '--connect-timeout', '20', '-o', $part, $url)
-                : array('wget', '-q', '-t', '3', '-T', '60', '-O', $part, $url);
+                ? array($exe, '-fsSL', '--retry', '3', '--connect-timeout', '20', '-o', $part, $url)
+                : array($exe, '-q', '-t', '3', '-T', '60', '-O', $part, $url);
             if (!$verify) array_splice($args, 1, 0, $tool === 'curl' ? '-k' : '--no-check-certificate');
             list($launched, $rc, $out) = self::run($args);
             if ($launched && $rc === 0 && is_file($part)) return null;
@@ -643,16 +643,44 @@ class SanottsEngine
 
     public static function haveTool($name)
     {
-        $path = (string)getenv('PATH');
+        return self::findTool($name) !== null;
+    }
+
+    /** Стандартные каталоги программ: в них ищем, даже если PATH у PHP пуст. */
+    const STD_BIN_DIRS = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+
+    /** PATH процесса PHP пуст: php-fpm по умолчанию (clear_env = yes) окружение не передаёт. */
+    public static function pathEmpty()
+    {
+        return trim((string)getenv('PATH')) === '';
+    }
+
+    /**
+     * Полный путь к программе или null. Каталоги из PATH, затем (не Windows) $PREFIX/bin
+     * (Termux) и стандартные: у php-fpm PATH обычно пуст, а программы на месте.
+     * Запускать найденное — по этому пути, чтобы и запуск не зависел от PATH.
+     */
+    public static function findTool($name)
+    {
+        static $cache = array();
+        if (array_key_exists($name, $cache)) return $cache[$name];
+        $dirs = explode(PATH_SEPARATOR, (string)getenv('PATH'));
+        if (!self::isWindows()) {
+            if (getenv('PREFIX')) $dirs[] = getenv('PREFIX') . '/bin';
+            $dirs = array_merge($dirs, explode(':', self::STD_BIN_DIRS));
+        }
         $exts = self::isWindows() ? array('.exe', '.cmd', '.bat') : array('');
-        foreach (explode(PATH_SEPARATOR, $path) as $dir) {
-            if ($dir === '') continue;
+        $seen = array();
+        foreach ($dirs as $dir) {
+            $dir = self::trimDir(trim($dir));
+            if ($dir === '' || isset($seen[$dir])) continue;
+            $seen[$dir] = true;
             foreach ($exts as $e) {
-                $f = self::trimDir($dir) . DIRECTORY_SEPARATOR . $name . $e;
-                if (@is_file($f) && (self::isWindows() || @is_executable($f))) return true;
+                $f = $dir . DIRECTORY_SEPARATOR . $name . $e;
+                if (@is_file($f) && (self::isWindows() || @is_executable($f))) return $cache[$name] = $f;
             }
         }
-        return false;
+        return $cache[$name] = null;
     }
 
     /**
