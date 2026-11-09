@@ -14,7 +14,7 @@ require_once dirname(__FILE__) . '/lib/rules.php';
 
 class sanotts extends module
 {
-    const VERSION = '3.2.5';
+    const VERSION = '3.2.6';
     // Движок живёт внутри MajorDoMo (cms/sanotts, см. defaultBase()): туда
     // пишет пользователь веб-сервера на любой системе — Debian, Docker, Termux —
     // без root и sudo.
@@ -182,6 +182,12 @@ class sanotts extends module
         $baseN = str_replace('\\', '/', SanottsEngine::trimDir($this->config['BASE']));
         $rootN = defined('ROOT') ? str_replace('\\', '/', SanottsEngine::trimDir(ROOT)) : '/var/www';
         $add('open_basedir', $obd === '' || stripos($obd, $baseN) !== false || stripos($baseN, $rootN) === 0, $obd === '' ? '—' : $obd);
+        // Каталоги модуля, распакованные или созданные от root, PHP не перезапишет:
+        // установка и «Обновить движок» тогда не смогут положить файлы.
+        $bad = SanottsEngine::unwritableDirs(array($this->config['BASE'], SanottsEngine::binDir($this->config['BASE']),
+            $this->config['VOICES_DIR'], $this->config['CACHE_DIR'], dirname(__FILE__)));
+        $add('права на запись', !$bad, $bad ? SanottsEngine::permProblem($bad)
+            : 'каталоги модуля доступны для записи (PHP работает от ' . SanottsEngine::procUser() . ')');
 
         $cli = $this->config['CLI'];
         $add('sanotts_cli', $this->cliReady(), $cli . (is_file($cli) ? (is_executable($cli) ? '' : ' (не исполняемый)') : ' (нет файла)'));
@@ -507,7 +513,8 @@ class sanotts extends module
         if ($info['gender'] === 'm') $d[] = LANG_SANOTTS_GENDER_M;
         if ($info['params'] > 0) $d[] = self::paramsText($info['params']);
         if ($info['rate'] > 0) $d[] = self::num($info['rate'] / 1000, $info['rate'] % 1000 ? 2 : 0) . ' ' . LANG_SANOTTS_KHZ;
-        if ($info['teacher'] !== '') $d[] = LANG_SANOTTS_TEACHER . ' Piper ' . $info['teacher'];
+        // «ru_RU-irina-medium» — голос Piper; «Silero kseniya» — уже с названием системы (через копию в Piper).
+        if ($info['teacher'] !== '') $d[] = LANG_SANOTTS_TEACHER . ' ' . (strpos($info['teacher'], ' ') === false ? 'Piper ' : '') . $info['teacher'];
         $q = array();
         if ($info['wer'] !== '') {
             // «cer:0.468» — для китайского: ошибки по иероглифам, не по словам.
@@ -2575,6 +2582,9 @@ EOD;
 
         if (!$useCache || !file_exists($wavFile)) {
             $this->synthesizeToFile($message, $wavFile);
+            // Синтез из цикла, запущенного от root: файл кэша — веб-серверу, иначе тот
+            // не сможет его перезаписать или удалить при очистке кэша.
+            if (file_exists($wavFile)) SanottsEngine::giveToWebUser($wavFile, defined('ROOT') ? ROOT : '');
         } elseif ((int)$this->config['CACHE_CLEANUP'] === 1) {
             @touch($wavFile);
         }

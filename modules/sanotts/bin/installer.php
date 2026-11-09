@@ -268,9 +268,10 @@ class SanottsEngine
     public static function installProgram($src, $binDir, $name)
     {
         if (!is_file($src)) return 'нет файла ' . $src;
-        if (!is_dir($binDir) && !@mkdir($binDir, 0755, true)) return 'нет прав на создание ' . $binDir;
+        if (!is_dir($binDir) && !@mkdir($binDir, 0755, true)) return self::permProblem(self::unwritableDirs(array($binDir))) ?: 'нет прав на создание ' . $binDir;
         $dst = $binDir . '/' . $name;
         $new = $dst . '.new';
+        if (!is_writable($binDir)) return self::permProblem(array($binDir => self::ownerName($binDir)));
         if (!@copy($src, $new)) return 'не удалось скопировать ' . $src . ' в ' . $new;
         @chmod($new, 0755);
         if (!@rename($new, $dst)) {
@@ -646,6 +647,101 @@ class SanottsEngine
         return self::findTool($name) !== null;
     }
 
+    // ------------------------------------------------------------------
+    // Права на каталоги модуля
+    // ------------------------------------------------------------------
+
+    /** Имя пользователя, от которого работает PHP. */
+    public static function procUser()
+    {
+        if (function_exists('posix_geteuid') && function_exists('posix_getpwuid')) {
+            $pw = @posix_getpwuid(posix_geteuid());
+            return is_array($pw) ? $pw['name'] : (string)posix_geteuid();
+        }
+        return (string)(getenv('USERNAME') ?: getenv('USER') ?: @get_current_user());
+    }
+
+    /** Владелец файла или каталога: имя или uid; '' — не узнать (Windows). */
+    public static function ownerName($path)
+    {
+        $uid = @fileowner($path);
+        if ($uid === false || self::isWindows()) return '';
+        if (function_exists('posix_getpwuid') && ($pw = @posix_getpwuid($uid))) return $pw['name'];
+        return (string)$uid;
+    }
+
+    /**
+     * Каталоги из списка, в которые PHP писать не может (существующие), и для
+     * несуществующих — их ближайший существующий родитель без права записи.
+     */
+    public static function unwritableDirs(array $dirs)
+    {
+        $bad = array();
+        foreach ($dirs as $d) {
+            $d = self::trimDir((string)$d);
+            if ($d === '') continue;
+            while (!is_dir($d) && dirname($d) !== $d) $d = dirname($d);
+            if (is_dir($d) && !is_writable($d)) $bad[$d] = self::ownerName($d);
+        }
+        return $bad;
+    }
+
+    /**
+     * Текст ошибки «нет прав на запись»: какие каталоги, чьи, от чьего имени работает
+     * PHP и команда, которая это исправит (её выполняет root: сам PHP чужие файлы
+     * поправить не может). Пусто — всё в порядке.
+     */
+    public static function permProblem(array $bad)
+    {
+        if (!$bad) return '';
+        $who = self::procUser();
+        $list = array();
+        foreach ($bad as $d => $owner) $list[] = $d . ($owner !== '' ? ' (владелец ' . $owner . ')' : '');
+        $msg = 'нет прав на запись: ' . implode(', ', $list) . '; PHP работает от ' . ($who !== '' ? $who : '?');
+        if (!self::isWindows() && !self::isAndroid() && $who !== '') {
+            // вложенные каталоги и так попадут под -R родителя
+            $top = array();
+            foreach (array_keys($bad) as $d) {
+                $inner = false;
+                foreach (array_keys($bad) as $p) if ($p !== $d && strpos($d . '/', $p . '/') === 0) $inner = true;
+                if (!$inner) $top[] = $d;
+            }
+            $msg .= '. Исправить (от root): chown -R ' . $who . ': ' . implode(' ', array_map('escapeshellarg', $top));
+        }
+        return $msg;
+    }
+
+    /**
+     * Запущены от root (консоль, циклы MajorDoMo) — отдать созданное веб-серверу,
+     * иначе он потом не сможет его обновить или удалить. Владелец берётся у каталога
+     * cms сайта (в него пишет веб-сервер), иначе — www-data. Рекурсивно для каталога.
+     */
+    public static function giveToWebUser($path, $site = '')
+    {
+        if (self::isWindows() || !function_exists('posix_geteuid') || posix_geteuid() !== 0 || !file_exists($path)) return;
+        static $owner = null;
+        if ($owner === null) {
+            $owner = false;
+            $ref = $site !== '' ? self::trimDir($site) . '/cms' : '';
+            if ($ref !== '' && is_dir($ref) && @fileowner($ref) > 0) {
+                $owner = array(@fileowner($ref), @filegroup($ref));
+            } elseif (function_exists('posix_getpwnam') && ($pw = @posix_getpwnam('www-data'))) {
+                $owner = array($pw['uid'], $pw['gid']);
+            }
+        }
+        if (!$owner) return;
+        $items = array($path);
+        if (is_dir($path) && !is_link($path)) {
+            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+            foreach ($it as $f) $items[] = $f->getPathname();
+        }
+        foreach ($items as $f) {
+            if (is_link($f)) continue;
+            @chown($f, $owner[0]);
+            @chgrp($f, $owner[1]);
+        }
+    }
+
     /** Стандартные каталоги программ: в них ищем, даже если PATH у PHP пуст. */
     const STD_BIN_DIRS = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
@@ -854,13 +950,24 @@ class SanottsEngine
     {
         try {
             $this->steps();
+            $this->ownToWeb();
             $this->say('Done');
             return true;
         } catch (Exception $e) {
+            $this->ownToWeb();
             $this->say('ERROR: ' . $e->getMessage());
             $this->say('FAILED');
             return false;
         }
+    }
+
+    /** Установка от root (php install.php в консоли): созданное — веб-серверу. */
+    private function ownToWeb()
+    {
+        if (self::isWindows() || !function_exists('posix_geteuid') || posix_geteuid() !== 0) return;
+        $site = dirname(dirname(dirname(dirname(__FILE__))));   // modules/sanotts/bin → корень сайта
+        foreach (array_unique(array($this->base, $this->voicesDir)) as $d) self::giveToWebUser($d, $site);
+        $this->say('owner of ' . $this->base . ' → web server user (installed as root)');
     }
 
     private function fail($msg)
@@ -902,6 +1009,9 @@ class SanottsEngine
             ? $pw['name'] : (string)(getenv('USERNAME') ?: getenv('USER') ?: '?');
         $this->say('arch=' . self::arch() . ' os=' . PHP_OS . ' php=' . PHP_VERSION . ' user=' . $user . ' base=' . $this->base);
         @set_time_limit(0);
+        // Сразу, до скачивания: каталоги, распакованные или созданные от root, PHP не перезапишет.
+        $bad = self::unwritableDirs(array($this->base, self::binDir($this->base), $this->voicesDir, $this->data()));
+        if ($bad) $this->fail(self::permProblem($bad));
 
         foreach (array($this->base . '/bin', $this->voicesDir) as $d) {
             if (!is_dir($d) && !@mkdir($d, 0755, true)) $this->fail('нет прав на создание ' . $d);
